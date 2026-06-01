@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
+from godot_project_doctor.graph import build_graph, find_cycles
 from godot_project_doctor.indexer import resolve_ref_path
 from godot_project_doctor.models import Issue, ProjectIndex, Severity
 
@@ -22,6 +23,7 @@ def run_all_checks(index: ProjectIndex) -> list[Issue]:
 
     issues.extend(_check_missing_export_presets(index))
     issues.extend(_check_project_godot_integrity(index, project_root))
+    issues.extend(_check_circular_dependencies(index))
     issues.extend(_check_missing_external_resources(index, project_root))
     issues.extend(_check_large_textures(index, project_root))
     issues.extend(_check_large_audio(index, project_root))
@@ -104,6 +106,37 @@ def _check_project_godot_integrity(index: ProjectIndex, project_root: Path) -> l
                 )
             )
 
+    return issues
+
+
+def _check_circular_dependencies(index: ProjectIndex) -> list[Issue]:
+    """Detect cycles in the resource dependency graph.
+
+    A cycle such as ``SceneA.tscn → Enemy.tscn → SceneA.tscn`` can cause
+    loading deadlocks or infinite recursion at runtime.
+
+    Each unique cycle is reported as a single ``CIRCULAR_DEPENDENCY`` ERROR.
+    The ``details`` field lists the cycle path in order.  Duplicate rotations
+    of the same cycle are suppressed.
+    """
+    graph = build_graph(index)
+    cycles = find_cycles(graph)
+    if not cycles:
+        return []
+
+    issues: list[Issue] = []
+    for cycle in cycles:
+        # Build a readable arrow chain: A → B → C → A
+        chain = " -> ".join(cycle) + f" -> {cycle[0]}"
+        issues.append(
+            Issue(
+                code="CIRCULAR_DEPENDENCY",
+                severity=Severity.ERROR,
+                message=f"Circular dependency detected ({len(cycle)} node(s)): {cycle[0]}",
+                file=None,
+                details=f"Cycle: {chain}",
+            )
+        )
     return issues
 
 

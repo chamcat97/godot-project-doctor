@@ -11,6 +11,7 @@ from godot_project_doctor.graph import build_graph
 from godot_project_doctor.models import Issue, ProjectIndex, Severity
 
 # ── Issue-code constants shared with checks.py ────────────────────────────────
+_CODE_CIRCULAR = "CIRCULAR_DEPENDENCY"
 _CODE_MISSING = "MISSING_EXT_RESOURCE"
 _CODE_LARGE_TEX = "LARGE_TEXTURE"
 _CODE_LARGE_AUDIO = "LARGE_AUDIO"

@@ -8,6 +8,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`CIRCULAR_DEPENDENCY`** (ERROR): detects cycles in the resource dependency
+  graph (e.g. `SceneA.tscn → Enemy.tscn → SceneA.tscn`).  Uses iterative DFS
+  to avoid Python stack overflows; duplicate cycle rotations are suppressed.
+- `graph.find_cycles()`: public API for cycle detection, normalises
+  project-relative and `res://` paths before comparison.
+- `graph._to_res_path()`: internal helper that normalises both path forms.
+
 ### Fixed
 - `_ref_to_canonical_rel`: relative paths containing `..` (e.g. `../assets/bg.png`)
   were not normalised, causing false `UNUSED_ASSET_CANDIDATE` warnings for assets

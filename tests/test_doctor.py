@@ -1659,5 +1659,153 @@ class TestContextKeywordFix(unittest.TestCase):
         self.assertIsNotNone(focus)
 
 
+# ─── Circular dependency detection ───────────────────────────────────────────
+
+
+class TestFindCycles(unittest.TestCase):
+    """Unit tests for graph.find_cycles()."""
+
+    def setUp(self) -> None:
+        import godot_project_doctor.graph as graph_mod
+
+        self._find = graph_mod.find_cycles
+
+    def test_acyclic_graph_returns_empty(self):
+        g = {
+            "scenes/Main.tscn": ["res://scripts/player.gd"],
+            "scripts/player.gd": [],
+        }
+        self.assertEqual(self._find(g), [])
+
+    def test_simple_two_node_cycle(self):
+        # A -> B -> A
+        g = {
+            "scenes/A.tscn": ["res://scenes/B.tscn"],
+            "scenes/B.tscn": ["res://scenes/A.tscn"],
+        }
+        cycles = self._find(g)
+        self.assertEqual(len(cycles), 1)
+        cycle = cycles[0]
+        self.assertEqual(len(cycle), 2)
+        self.assertIn("res://scenes/A.tscn", cycle)
+        self.assertIn("res://scenes/B.tscn", cycle)
+
+    def test_three_node_cycle(self):
+        g = {
+            "scenes/A.tscn": ["res://scenes/B.tscn"],
+            "scenes/B.tscn": ["res://scenes/C.tscn"],
+            "scenes/C.tscn": ["res://scenes/A.tscn"],
+        }
+        cycles = self._find(g)
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual(len(cycles[0]), 3)
+
+    def test_self_loop_detected(self):
+        g = {"scenes/A.tscn": ["res://scenes/A.tscn"]}
+        cycles = self._find(g)
+        self.assertEqual(len(cycles), 1)
+
+    def test_no_duplicate_rotations(self):
+        """The same cycle reported from different starting nodes must appear once."""
+        g = {
+            "scenes/A.tscn": ["res://scenes/B.tscn"],
+            "scenes/B.tscn": ["res://scenes/C.tscn"],
+            "scenes/C.tscn": ["res://scenes/A.tscn"],
+        }
+        cycles = self._find(g)
+        self.assertEqual(len(cycles), 1)
+
+    def test_disconnected_cycle_plus_acyclic(self):
+        g = {
+            "scenes/A.tscn": ["res://scenes/B.tscn"],
+            "scenes/B.tscn": ["res://scenes/A.tscn"],
+            "scenes/X.tscn": ["res://scripts/foo.gd"],
+        }
+        cycles = self._find(g)
+        self.assertEqual(len(cycles), 1)
+
+    def test_two_independent_cycles(self):
+        g = {
+            "scenes/A.tscn": ["res://scenes/B.tscn"],
+            "scenes/B.tscn": ["res://scenes/A.tscn"],
+            "scenes/C.tscn": ["res://scenes/D.tscn"],
+            "scenes/D.tscn": ["res://scenes/C.tscn"],
+        }
+        cycles = self._find(g)
+        self.assertEqual(len(cycles), 2)
+
+    def test_output_is_deterministic(self):
+        g = {
+            "scenes/A.tscn": ["res://scenes/B.tscn"],
+            "scenes/B.tscn": ["res://scenes/A.tscn"],
+        }
+        self.assertEqual(self._find(g), self._find(g))
+
+
+class TestCircularDependencyCheck(unittest.TestCase):
+    """Integration tests: CIRCULAR_DEPENDENCY reported through scan()."""
+
+    def test_acyclic_project_no_circular_issue(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="AC"\n')
+            _write(root / "player.gd", "extends Node\n")
+            _write(
+                root / "scenes" / "Main.tscn",
+                '[gd_scene format=3]\n[ext_resource type="Script" path="res://player.gd" id="1"]\n',
+            )
+            index = scan(root)
+            circs = [i for i in index.issues if i.code == "CIRCULAR_DEPENDENCY"]
+            self.assertEqual(circs, [])
+
+    def test_two_scene_cycle_detected(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="Cy"\n')
+            _write(
+                root / "scenes" / "A.tscn",
+                "[gd_scene format=3]\n"
+                '[ext_resource type="PackedScene" path="res://scenes/B.tscn" id="1"]\n',
+            )
+            _write(
+                root / "scenes" / "B.tscn",
+                "[gd_scene format=3]\n"
+                '[ext_resource type="PackedScene" path="res://scenes/A.tscn" id="1"]\n',
+            )
+            index = scan(root)
+            circs = [i for i in index.issues if i.code == "CIRCULAR_DEPENDENCY"]
+            self.assertEqual(len(circs), 1)
+            self.assertEqual(circs[0].severity, Severity.ERROR)
+            self.assertIn("A.tscn", circs[0].details or "")
+            self.assertIn("B.tscn", circs[0].details or "")
+
+    def test_self_referencing_scene_detected(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="Self"\n')
+            _write(
+                root / "scenes" / "Recursive.tscn",
+                "[gd_scene format=3]\n"
+                '[ext_resource type="PackedScene" path="res://scenes/Recursive.tscn" id="1"]\n',
+            )
+            index = scan(root)
+            circs = [i for i in index.issues if i.code == "CIRCULAR_DEPENDENCY"]
+            self.assertEqual(len(circs), 1)
+
+    def test_cycle_details_contains_arrow_chain(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="Cy"\n')
+            _write(
+                root / "scenes" / "A.tscn",
+                "[gd_scene format=3]\n"
+                '[ext_resource type="PackedScene" path="res://scenes/B.tscn" id="1"]\n',
+            )
+            _write(
+                root / "scenes" / "B.tscn",
+                "[gd_scene format=3]\n"
+                '[ext_resource type="PackedScene" path="res://scenes/A.tscn" id="1"]\n',
+            )
+            index = scan(root)
+            circ = next(i for i in index.issues if i.code == "CIRCULAR_DEPENDENCY")
+            self.assertIn("->", circ.details or "")
+
+
 if __name__ == "__main__":
     unittest.main()

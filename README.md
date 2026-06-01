@@ -137,6 +137,7 @@ Simple Markdown report suitable for GitHub issues or documentation.
 
 | Code | Severity | Description |
 |---|---|---|
+| `CIRCULAR_DEPENDENCY` | ERROR | A cycle exists in the resource dependency graph (e.g. scene A → scene B → scene A) |
 | `MISSING_MAIN_SCENE` | ERROR | `run/main_scene` in `project.godot` points to a file that does not exist |
 | `MISSING_AUTOLOAD` | ERROR | An autoload path in `project.godot` does not exist |
 | `MISSING_EXT_RESOURCE` | ERROR | A `.tscn`/`.tres`/`.gd` file references a path that does not exist |
