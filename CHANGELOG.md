@@ -8,7 +8,28 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-*(Phase 4c, 4d in progress)*
+*(Phase 4d in progress)*
+
+---
+
+## [0.7.0] — 2026-06-01
+
+### Added
+- **`BROKEN_SIGNAL_CONNECTION`** (WARNING): detects signal connections in `.tscn`
+  files where the target `method` is not defined in the receiving node's directly-
+  attached GDScript file.
+  - Parses `[connection signal=... from=... to=... method=...]` headers.
+  - Builds a `node_path → script` map from `[node ...]` and `[ext_resource ...]`
+    headers within each scene.
+  - `uid://` paths in ext_resources are resolved via the existing `uid_map`.
+  - False-positive guards: skip if target node has no script, script is
+    unreadable, or the `to` node path is not found in the scene.
+  - Known limitation: inherited methods (from `extends`) are not followed;
+    suppress with `severity.BROKEN_SIGNAL_CONNECTION = "none"` in config.
+- `_parse_scene_for_connections()` internal helper in `checks.py`.
+
+### Changed
+- `__version__` bumped to `"0.7.0"`.
 
 ---
 

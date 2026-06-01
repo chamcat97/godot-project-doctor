@@ -1372,7 +1372,7 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version_is_0_2_0(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.6.0")
+        self.assertEqual(godot_project_doctor.__version__, "0.7.0")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
@@ -2646,6 +2646,162 @@ class TestUndefinedInputActionCheck(unittest.TestCase):
         )
         codes = [i.message for i in issues]
         self.assertEqual(codes, sorted(codes))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4c — BROKEN_SIGNAL_CONNECTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestParseSceneForConnections(unittest.TestCase):
+    """Unit tests for the internal _parse_scene_for_connections helper."""
+
+    def _parse(self, text: str, uid_map=None):
+        from godot_project_doctor.checks import _parse_scene_for_connections
+
+        return _parse_scene_for_connections(text, uid_map=uid_map)
+
+    def test_root_node_gets_empty_path(self):
+        text = '[node name="Main" type="Node2D"]\nscript = ExtResource("1")\n'
+        _, node_scripts, _ = self._parse(text)
+        self.assertIn("", node_scripts)
+        self.assertEqual(node_scripts[""], "1")
+
+    def test_child_node_path_built(self):
+        text = (
+            '[node name="Main" type="Node2D"]\n'
+            '[node name="Button" type="Button" parent="."]\n'
+            'script = ExtResource("2")\n'
+        )
+        _, node_scripts, _ = self._parse(text)
+        self.assertIn("Button", node_scripts)
+
+    def test_nested_node_path(self):
+        text = (
+            '[node name="Root" type="Node2D"]\n'
+            '[node name="UI" type="Control" parent="."]\n'
+            '[node name="Btn" type="Button" parent="UI"]\n'
+            'script = ExtResource("3")\n'
+        )
+        _, node_scripts, _ = self._parse(text)
+        self.assertIn("UI/Btn", node_scripts)
+
+    def test_ext_resource_script_captured(self):
+        text = '[ext_resource type="Script" path="res://player.gd" id="1"]\n'
+        id_to_path, _, _ = self._parse(text)
+        self.assertEqual(id_to_path.get("1"), "res://player.gd")
+
+    def test_non_script_ext_resource_ignored(self):
+        text = '[ext_resource type="Texture2D" path="res://icon.png" id="1"]\n'
+        id_to_path, _, _ = self._parse(text)
+        self.assertNotIn("1", id_to_path)
+
+    def test_connection_captured(self):
+        text = '[connection signal="pressed" from="Button" to="." method="_on_btn"]\n'
+        _, _, conns = self._parse(text)
+        self.assertEqual(len(conns), 1)
+        self.assertEqual(conns[0]["method"], "_on_btn")
+        self.assertEqual(conns[0]["to"], ".")
+
+    def test_connection_missing_method_skipped(self):
+        text = '[connection signal="pressed" from="Button" to="."]\n'
+        _, _, conns = self._parse(text)
+        self.assertEqual(len(conns), 0)
+
+    def test_uid_resolved_via_uid_map(self):
+        text = '[ext_resource type="Script" path="uid://abc123" id="1"]\n'
+        uid_map = {"uid://abc123": "res://player.gd"}
+        id_to_path, _, _ = self._parse(text, uid_map=uid_map)
+        self.assertEqual(id_to_path.get("1"), "res://player.gd")
+
+    def test_blank_lines_dont_break_node_block(self):
+        text = (
+            '[node name="Main" type="Node2D"]\n'
+            "\n"
+            'script = ExtResource("1")\n'
+        )
+        _, node_scripts, _ = self._parse(text)
+        self.assertIn("", node_scripts)
+
+
+class TestBrokenSignalConnectionCheck(unittest.TestCase):
+    """Integration tests for BROKEN_SIGNAL_CONNECTION."""
+
+    def _check(self, scene_content: str, gd_content: str, script_name="handler.gd"):
+        from godot_project_doctor.checks import _check_broken_signal_connections
+        from godot_project_doctor.indexer import index_project
+        from godot_project_doctor.parser import parse_project_godot
+
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="Game"\n')
+            _write(root / script_name, gd_content)
+            _write(root / "scenes" / "Main.tscn", scene_content)
+            summary = parse_project_godot(root)
+            index = index_project(root, summary)
+            return _check_broken_signal_connections(index, root)
+
+    def _make_scene(self, method_name="_on_button_pressed", script_rel="res://handler.gd"):
+        return (
+            f'[gd_scene load_steps=2 format=3]\n'
+            f'[ext_resource type="Script" path="{script_rel}" id="1"]\n'
+            f'[node name="Main" type="Node2D"]\n'
+            f'script = ExtResource("1")\n'
+            f'[node name="Button" type="Button" parent="."]\n'
+            f'[connection signal="pressed" from="Button" to="." method="{method_name}"]\n'
+        )
+
+    def test_method_present_no_issue(self):
+        issues = self._check(
+            self._make_scene("_on_button_pressed"),
+            "extends Node2D\nfunc _on_button_pressed():\n    pass\n",
+        )
+        self.assertEqual(issues, [])
+
+    def test_method_missing_reports_warning(self):
+        issues = self._check(
+            self._make_scene("_on_button_pressed"),
+            "extends Node2D\nfunc _ready():\n    pass\n",
+        )
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].code, "BROKEN_SIGNAL_CONNECTION")
+        self.assertEqual(issues[0].severity.value, "WARNING")
+        self.assertIn("_on_button_pressed", issues[0].message)
+
+    def test_static_func_counts_as_present(self):
+        issues = self._check(
+            self._make_scene("_on_button_pressed"),
+            "extends Node2D\nstatic func _on_button_pressed():\n    pass\n",
+        )
+        self.assertEqual(issues, [])
+
+    def test_no_script_on_target_node_skipped(self):
+        scene = (
+            '[gd_scene load_steps=1 format=3]\n'
+            '[node name="Main" type="Node2D"]\n'
+            '[node name="Button" type="Button" parent="."]\n'
+            '[connection signal="pressed" from="Button" to="." method="_on_btn"]\n'
+        )
+        issues = self._check(scene, "extends Node2D\nfunc _ready():\n    pass\n")
+        self.assertEqual(issues, [])
+
+    def test_unresolvable_to_path_skipped(self):
+        scene = (
+            '[gd_scene load_steps=2 format=3]\n'
+            '[ext_resource type="Script" path="res://handler.gd" id="1"]\n'
+            '[node name="Main" type="Node2D"]\n'
+            'script = ExtResource("1")\n'
+            # connection targets "NonExistentChild" which has no node entry
+            '[connection signal="pressed" from="." to="NonExistentChild" method="_on_btn"]\n'
+        )
+        issues = self._check(scene, "extends Node2D\nfunc _ready():\n    pass\n")
+        self.assertEqual(issues, [])
+
+    def test_indented_func_found(self):
+        issues = self._check(
+            self._make_scene("_on_button_pressed"),
+            "extends Node2D\n\n\nfunc _on_button_pressed():\n\tpass\n",
+        )
+        self.assertEqual(issues, [])
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -16,6 +17,14 @@ if TYPE_CHECKING:
 # Godot 4 built-in Input Map actions all use the "ui_" prefix.
 # We skip them to avoid false positives from default engine actions.
 _GODOT_BUILTIN_ACTION_PREFIX = "ui_"
+
+# ── Scene-parsing regexes (BROKEN_SIGNAL_CONNECTION) ─────────────────────────
+_SC_EXT_RES_RE = re.compile(r"\[ext_resource\b([^\]]*)\]")
+_SC_NODE_RE = re.compile(r"\[node\b([^\]]*)\]")
+_SC_CONN_RE = re.compile(r"\[connection\b([^\]]*)\]")
+_SC_ATTR_RE = re.compile(r'\b(\w+)="([^"]*)"')
+# Matches both quoted ("1_abc") and unquoted (1) ExtResource IDs
+_SC_SCRIPT_PROP_RE = re.compile(r'^script\s*=\s*ExtResource\(\s*"?([^"\)\s]+)"?\s*\)')
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -49,6 +58,7 @@ def run_all_checks(index: ProjectIndex, config: Config | None = None) -> list[Is
     issues.extend(_check_large_audio(index, project_root, config))
     issues.extend(_check_unused_asset_candidates(index, project_root))
     issues.extend(_check_undefined_input_actions(index))
+    issues.extend(_check_broken_signal_connections(index, project_root))
 
     return issues
 
@@ -370,6 +380,173 @@ def _check_undefined_input_actions(index: ProjectIndex) -> list[Issue]:
                 ),
             )
         )
+    return issues
+
+
+def _parse_scene_for_connections(
+    text: str,
+    uid_map: dict[str, str] | None = None,
+) -> tuple[dict[str, str], dict[str, str], list[dict[str, str]]]:
+    """Parse .tscn text and return scene structure needed for connection checking.
+
+    Returns
+    -------
+    id_to_path:
+        ``{ref_id: res_path}`` for Script-type ext_resources only.
+    node_scripts:
+        ``{node_path: ref_id}`` for nodes with an attached script.
+        Root node path is ``""``.
+    connections:
+        List of ``{signal, from, to, method}`` dicts.
+    """
+    id_to_path: dict[str, str] = {}
+    node_scripts: dict[str, str] = {}
+    connections: list[dict[str, str]] = []
+    current_node_path: str | None = None
+
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue  # blank lines do not end a node block
+
+        if s.startswith("["):
+            # ext_resource header
+            m = _SC_EXT_RES_RE.match(s)
+            if m:
+                attrs = dict(_SC_ATTR_RE.findall(m.group(1)))
+                rid = attrs.get("id", "")
+                rtype = attrs.get("type", "")
+                rpath = attrs.get("path", "")
+                if rid and rtype in ("Script", "GDScript", "CSharpScript") and rpath:
+                    # Resolve uid:// via uid_map when available
+                    if rpath.startswith("uid://") and uid_map:
+                        rpath = uid_map.get(rpath, rpath)
+                    id_to_path[rid] = rpath
+                current_node_path = None
+                continue
+
+            # node header
+            m = _SC_NODE_RE.match(s)
+            if m:
+                attrs = dict(_SC_ATTR_RE.findall(m.group(1)))
+                name = attrs.get("name", "")
+                parent = attrs.get("parent")
+                if parent is None:
+                    current_node_path = ""  # root node
+                elif parent == ".":
+                    current_node_path = name
+                else:
+                    current_node_path = f"{parent}/{name}"
+                continue
+
+            # connection header
+            m = _SC_CONN_RE.match(s)
+            if m:
+                attrs = dict(_SC_ATTR_RE.findall(m.group(1)))
+                if "to" in attrs and "method" in attrs:
+                    connections.append(
+                        {
+                            "signal": attrs.get("signal", ""),
+                            "from": attrs.get("from", "."),
+                            "to": attrs["to"],
+                            "method": attrs["method"],
+                        }
+                    )
+                current_node_path = None
+                continue
+
+            # any other header ends the current node block
+            current_node_path = None
+            continue
+
+        # Property line inside a node block
+        if current_node_path is not None:
+            m = _SC_SCRIPT_PROP_RE.match(s)
+            if m:
+                node_scripts[current_node_path] = m.group(1)
+
+    return id_to_path, node_scripts, connections
+
+
+def _check_broken_signal_connections(index: ProjectIndex, project_root: Path) -> list[Issue]:
+    """Warn when a signal connection targets a method not found in the script.
+
+    False-positive guards
+    ---------------------
+    * Target node has no attached script → skip.
+    * Script file is unreadable / does not exist → skip (let MISSING_EXT_RESOURCE
+      report that separately).
+    * ``to`` node path not in the scene's node map → skip.
+    * The ``method`` *is* inherited from a base class — static analysis cannot
+      trace the inheritance chain, so inherited methods are a known false-negative.
+      Users can suppress with ``severity.BROKEN_SIGNAL_CONNECTION = "none"`` in
+      config.
+    """
+    issues: list[Issue] = []
+
+    for scene_rel in index.scenes:
+        abs_path = project_root / scene_rel
+        try:
+            text = abs_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        id_to_path, node_scripts, connections = _parse_scene_for_connections(
+            text, uid_map=index.uid_map
+        )
+        if not connections:
+            continue
+
+        for conn in connections:
+            to_raw = conn["to"]
+            method = conn["method"]
+            if not method:
+                continue
+
+            # "." in Godot NodePath means the scene root (path = "")
+            to_path = "" if to_raw == "." else to_raw
+
+            script_ref_id = node_scripts.get(to_path)
+            if script_ref_id is None:
+                continue  # node has no script — skip
+
+            script_res_path = id_to_path.get(script_ref_id)
+            if not script_res_path or not script_res_path.startswith("res://"):
+                continue  # not a GDScript path — skip
+
+            script_abs = project_root / script_res_path[len("res://") :]
+            try:
+                script_text = script_abs.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue  # unreadable — let MISSING_EXT_RESOURCE handle it
+
+            # Search for func definition (any indentation, optional static keyword)
+            func_pattern = re.compile(
+                r"(?m)^\s*(?:static\s+)?func\s+" + re.escape(method) + r"\s*\("
+            )
+            if func_pattern.search(script_text):
+                continue  # method present — OK
+
+            issues.append(
+                Issue(
+                    code="BROKEN_SIGNAL_CONNECTION",
+                    severity=Severity.WARNING,
+                    message=(
+                        f"Signal '{conn['signal']}' connection targets missing method "
+                        f"'{method}' (not found in '{script_res_path}')"
+                    ),
+                    file=scene_rel,
+                    details=(
+                        f"Connection: signal='{conn['signal']}' from='{conn['from']}' "
+                        f"to='{to_raw}' method='{method}'. "
+                        f"Script: {script_res_path}. "
+                        "If '{method}' is inherited from a base class, suppress this "
+                        'warning with `severity.BROKEN_SIGNAL_CONNECTION = "none"` '
+                        "in your .gdoctor.toml."
+                    ),
+                )
+            )
+
     return issues
 
 
