@@ -1,5 +1,7 @@
 # godot-project-doctor
 
+**English** | [한국어](README.ko.md)
+
 [![PyPI version](https://img.shields.io/pypi/v/godot-project-doctor.svg)](https://pypi.org/project/godot-project-doctor/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/godot-project-doctor.svg)](https://pypi.org/project/godot-project-doctor/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
