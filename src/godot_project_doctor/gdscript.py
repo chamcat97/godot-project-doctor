@@ -49,6 +49,20 @@ _STATIC_LOAD_RE = re.compile(
     r"\s*",
 )
 
+# Matches Input.*(<"action_name">) calls with a static string literal.
+# Covered methods: is_action, is_action_pressed, is_action_just_pressed,
+# is_action_just_released, get_action_strength, get_action_raw_strength,
+# action_press, action_release.
+_INPUT_ACTION_RE = re.compile(
+    r"(?<![A-Za-z0-9_])"
+    r"Input\."
+    r"(?:is_action(?:_pressed|_just_pressed|_just_released)?|"
+    r"get_action_(?:strength|raw_strength)|"
+    r"action_(?:press|release))"
+    r"\s*\(\s*"
+    r'(?:"(?P<name_dq>[^"]+)"|\'(?P<name_sq>[^\']+)\')',
+)
+
 
 # ── Lexical helpers ────────────────────────────────────────────────────────────
 
@@ -162,5 +176,34 @@ def extract_gdscript_refs(file_path: Path, project_root: Path) -> list[ResourceR
                     kind="gdscript",
                 )
             )
+
+    return refs
+
+
+def extract_input_action_refs(file_path: Path, project_root: Path) -> list[tuple[str, str]]:
+    """Return ``(action_name, source_file)`` pairs for static ``Input.*()`` calls.
+
+    Only string-literal action names are collected; expressions or variables are
+    silently skipped to avoid false positives.  Comment lines and inline comments
+    are stripped before scanning (same approach as :func:`extract_gdscript_refs`).
+    """
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+
+    rel = str(file_path.relative_to(project_root))
+    refs: list[tuple[str, str]] = []
+
+    for raw_line in text.splitlines():
+        if raw_line.lstrip().startswith("#"):
+            continue
+        line = _strip_inline_comment(raw_line)
+        for m in _INPUT_ACTION_RE.finditer(line):
+            if _pos_in_string(line, m.start()):
+                continue
+            name = m.group("name_dq") or m.group("name_sq") or ""
+            if name:
+                refs.append((name, rel))
 
     return refs

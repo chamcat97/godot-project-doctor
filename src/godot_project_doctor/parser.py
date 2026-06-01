@@ -70,4 +70,10 @@ def parse_project_godot(project_root: Path) -> ProjectSummary:
             if m:
                 summary.autoloads[m.group(1)] = m.group(2)
 
+        elif current_section == "input":
+            # action_name={ ... }  — one action per key=value block
+            m = re.match(r"^(\w+)\s*=\s*\{", line)
+            if m:
+                summary.input_actions.add(m.group(1))
+
     return summary

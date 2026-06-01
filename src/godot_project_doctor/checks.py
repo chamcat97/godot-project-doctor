@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,10 @@ from godot_project_doctor.models import Issue, ProjectIndex, Severity
 
 if TYPE_CHECKING:
     from godot_project_doctor.config import Config
+
+# Godot 4 built-in Input Map actions all use the "ui_" prefix.
+# We skip them to avoid false positives from default engine actions.
+_GODOT_BUILTIN_ACTION_PREFIX = "ui_"
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -43,6 +48,7 @@ def run_all_checks(index: ProjectIndex, config: Config | None = None) -> list[Is
     issues.extend(_check_large_textures(index, project_root, config))
     issues.extend(_check_large_audio(index, project_root, config))
     issues.extend(_check_unused_asset_candidates(index, project_root))
+    issues.extend(_check_undefined_input_actions(index))
 
     return issues
 
@@ -320,6 +326,51 @@ def _ref_to_canonical_rel(
     source_dir = PurePosixPath(source_file.replace("\\", "/")).parent
     raw = str(source_dir / ref_path)
     return _normalize_posix(raw)
+
+
+def _check_undefined_input_actions(index: ProjectIndex) -> list[Issue]:
+    """Warn when GDScript references an input action not declared in project.godot.
+
+    Only static string literals passed to ``Input.is_action_*()``,
+    ``Input.get_action_*()``, ``Input.action_press()``, and
+    ``Input.action_release()`` are checked; expressions or variables are skipped.
+
+    Godot's built-in actions (all prefixed with ``ui_``) are excluded from the
+    check to prevent false positives from default engine bindings.
+    """
+    declared = index.summary.input_actions
+    if not index.input_action_refs:
+        return []
+
+    # Group by action name: {name: [source_file, ...]}
+    by_action: dict[str, list[str]] = defaultdict(list)
+    for action_name, source_file in index.input_action_refs:
+        by_action[action_name].append(source_file)
+
+    issues: list[Issue] = []
+    for action_name in sorted(by_action):
+        if action_name.startswith(_GODOT_BUILTIN_ACTION_PREFIX):
+            continue
+        if action_name in declared:
+            continue
+        files = sorted(set(by_action[action_name]))
+        file_list = ", ".join(f"'{f}'" for f in files[:3])
+        if len(files) > 3:
+            file_list += f" … (+{len(files) - 3} more)"
+        issues.append(
+            Issue(
+                code="UNDEFINED_INPUT_ACTION",
+                severity=Severity.WARNING,
+                message=f"Input action '{action_name}' used in GDScript but not declared in project.godot",
+                file=files[0],
+                details=(
+                    f"Referenced in {len(files)} file(s): {file_list}. "
+                    "Add the action in the Godot editor Input Map settings, "
+                    "or remove the reference if the action is obsolete."
+                ),
+            )
+        )
+    return issues
 
 
 def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> list[Issue]:

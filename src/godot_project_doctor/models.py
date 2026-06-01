@@ -142,6 +142,8 @@ class ProjectSummary:
     main_scene: str | None = None
     autoloads: dict[str, str] = field(default_factory=dict)
     godot_version_hint: str | None = None
+    # Input actions declared in the [input] section.  Not serialised to JSON.
+    input_actions: set[str] = field(default_factory=set)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -173,6 +175,8 @@ class ProjectIndex:
     uid_map: dict[str, str] = field(default_factory=dict)
     # Source of each UID resolution.  Not serialised to JSON.
     uid_sources: dict[str, str] = field(default_factory=dict)
+    # (action_name, source_file) pairs from GDScript Input.*() calls.  Not serialised.
+    input_action_refs: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def issue_counts(self) -> dict[str, int]:

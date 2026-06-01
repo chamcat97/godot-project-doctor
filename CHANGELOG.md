@@ -8,7 +8,30 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-*(Phase 4 deep checks in progress)*
+*(Phase 4c, 4d in progress)*
+
+---
+
+## [0.6.0] — 2026-06-01
+
+### Added
+- **`UNDEFINED_INPUT_ACTION`** (WARNING): warns when a GDScript file calls
+  `Input.is_action_pressed()`, `Input.is_action_just_pressed()`,
+  `Input.is_action_just_released()`, `Input.get_action_strength()`,
+  `Input.get_action_raw_strength()`, `Input.action_press()`, or
+  `Input.action_release()` with a static string literal that is not declared in
+  the `[input]` section of `project.godot`.
+  - Built-in Godot actions (`ui_*` prefix) are excluded from the check.
+  - Dynamic expressions / variables are silently skipped (no false positives).
+  - `ProjectSummary.input_actions` (internal `set[str]`, not serialised):
+    action names collected from `[input]` section during parsing.
+  - `ProjectIndex.input_action_refs` (internal `list[tuple[str, str]]`, not
+    serialised): `(action_name, source_file)` pairs from GDScript scanning.
+- `extract_input_action_refs()` in `gdscript.py`: new public function that
+  extracts static action-name string literals from the supported Input API.
+
+### Changed
+- `__version__` bumped to `"0.6.0"`.
 
 ---
 

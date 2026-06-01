@@ -106,7 +106,7 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
     ``resolved_path`` and ``resolved_via`` fields are populated.
     """
     # Import here to avoid circular dependencies at module load time
-    from godot_project_doctor.gdscript import extract_gdscript_refs
+    from godot_project_doctor.gdscript import extract_gdscript_refs, extract_input_action_refs
     from godot_project_doctor.uid_map import build_uid_map
 
     scenes: list[str] = []
@@ -118,6 +118,7 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
     other_files: list[str] = []
     has_export_presets = False
     all_refs: list[ResourceRef] = []
+    all_input_refs: list[tuple[str, str]] = []
 
     for path in _walk(project_root):
         rel = str(path.relative_to(project_root))
@@ -136,6 +137,7 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
         elif ext in _SCRIPT_EXTS:
             scripts.append(rel)
             all_refs.extend(extract_gdscript_refs(path, project_root))
+            all_input_refs.extend(extract_input_action_refs(path, project_root))
         elif ext in _SHADER_EXTS:
             shaders.append(rel)
         elif ext in _IMAGE_EXTS:
@@ -180,6 +182,7 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
         refs=all_refs,
         uid_map=uid_map,
         uid_sources=uid_sources,
+        input_action_refs=all_input_refs,
     )
     index.issues.extend(uid_issues)
     return index

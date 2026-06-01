@@ -208,6 +208,7 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 | `LARGE_TEXTURE` | WARNING | Raster image exceeds 2048×2048 px (requires Pillow) |
 | `LARGE_AUDIO` | WARNING | Audio file is larger than 10 MB |
 | `DUPLICATE_UID` | WARNING | Two or more sources claim the same `uid://` for different files |
+| `UNDEFINED_INPUT_ACTION` | WARNING | GDScript calls `Input.is_action_*()`/`get_action_strength()` with a name not declared in `project.godot` `[input]` (built-in `ui_*` actions excluded) |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene, resource, or script |
 | `NO_MAIN_SCENE` | INFO | `run/main_scene` is not configured (may be intentional for library projects) |
 | `NO_EXPORT_PRESETS` | INFO | `export_presets.cfg` is absent |

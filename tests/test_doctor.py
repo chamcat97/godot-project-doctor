@@ -1372,7 +1372,7 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version_is_0_2_0(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.5.0")
+        self.assertEqual(godot_project_doctor.__version__, "0.6.0")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
@@ -2475,6 +2475,177 @@ class TestSarifOutput(unittest.TestCase):
                 self.assertEqual(doc["version"], "2.1.0")
             except json.JSONDecodeError:
                 self.fail(f"Not valid JSON: {result.stdout[:300]}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4b — UNDEFINED_INPUT_ACTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestParserInputActions(unittest.TestCase):
+    """Parser correctly collects action names from the [input] section."""
+
+    def _parse(self, content: str):
+        with TempProject() as root:
+            _write(root / "project.godot", content)
+            return parse_project_godot(root)
+
+    def test_single_action_parsed(self):
+        summary = self._parse(
+            """\
+[input]
+
+jump={
+"deadzone": 0.2,
+"events": []
+}
+"""
+        )
+        self.assertIn("jump", summary.input_actions)
+
+    def test_multiple_actions_parsed(self):
+        summary = self._parse(
+            """\
+[input]
+
+move_left={
+"deadzone": 0.2,
+"events": []
+}
+move_right={
+"deadzone": 0.2,
+"events": []
+}
+"""
+        )
+        self.assertIn("move_left", summary.input_actions)
+        self.assertIn("move_right", summary.input_actions)
+
+    def test_no_input_section_empty_set(self):
+        summary = self._parse('[application]\nconfig/name="Game"\n')
+        self.assertEqual(summary.input_actions, set())
+
+    def test_input_actions_not_serialised(self):
+        """input_actions must not appear in the to_dict() JSON output."""
+        summary = self._parse("[input]\njump={\n}\n")
+        d = summary.to_dict()
+        self.assertNotIn("input_actions", d)
+
+
+class TestExtractInputActionRefs(unittest.TestCase):
+    """GDScript Input action reference extraction."""
+
+    def _extract(self, gd_content: str):
+        from godot_project_doctor.gdscript import extract_input_action_refs
+
+        with TempProject() as root:
+            gd = root / "player.gd"
+            _write(gd, gd_content)
+            return extract_input_action_refs(gd, root)
+
+    def test_is_action_pressed_double_quote(self):
+        refs = self._extract('if Input.is_action_pressed("jump"):\n    pass\n')
+        self.assertEqual(refs, [("jump", "player.gd")])
+
+    def test_is_action_just_pressed_single_quote(self):
+        refs = self._extract("if Input.is_action_just_pressed('fire'):\n    pass\n")
+        self.assertEqual(refs, [("fire", "player.gd")])
+
+    def test_is_action_just_released(self):
+        refs = self._extract('if Input.is_action_just_released("dash"):\n    pass\n')
+        self.assertEqual(refs, [("dash", "player.gd")])
+
+    def test_get_action_strength(self):
+        refs = self._extract('var s = Input.get_action_strength("move_left")\n')
+        self.assertEqual(refs, [("move_left", "player.gd")])
+
+    def test_get_action_raw_strength(self):
+        refs = self._extract('var s = Input.get_action_raw_strength("move_right")\n')
+        self.assertEqual(refs, [("move_right", "player.gd")])
+
+    def test_action_press_and_release(self):
+        refs = self._extract(
+            'Input.action_press("jump")\nInput.action_release("jump")\n'
+        )
+        names = [r[0] for r in refs]
+        self.assertEqual(names, ["jump", "jump"])
+
+    def test_comment_line_skipped(self):
+        refs = self._extract('# Input.is_action_pressed("jump")\n')
+        self.assertEqual(refs, [])
+
+    def test_inline_comment_skipped(self):
+        refs = self._extract('var x = 1  # Input.is_action_pressed("jump")\n')
+        self.assertEqual(refs, [])
+
+    def test_inside_string_skipped(self):
+        refs = self._extract('var s = \'Input.is_action_pressed("jump")\'\n')
+        self.assertEqual(refs, [])
+
+    def test_dynamic_expression_skipped(self):
+        refs = self._extract("if Input.is_action_pressed(action_name):\n    pass\n")
+        self.assertEqual(refs, [])
+
+    def test_multiple_refs_in_one_file(self):
+        refs = self._extract(
+            'Input.is_action_pressed("jump")\nInput.is_action_pressed("fire")\n'
+        )
+        self.assertEqual(len(refs), 2)
+
+
+class TestUndefinedInputActionCheck(unittest.TestCase):
+    """UNDEFINED_INPUT_ACTION check integration tests."""
+
+    def _scan_project(self, project_godot: str, gd_content: str) -> list:
+        from godot_project_doctor.checks import _check_undefined_input_actions
+        from godot_project_doctor.indexer import index_project
+        from godot_project_doctor.parser import parse_project_godot
+
+        with TempProject() as root:
+            _write(root / "project.godot", project_godot)
+            _write(root / "player.gd", gd_content)
+            summary = parse_project_godot(root)
+            index = index_project(root, summary)
+            return _check_undefined_input_actions(index)
+
+    def test_declared_action_no_issue(self):
+        issues = self._scan_project(
+            '[input]\njump={\n"deadzone": 0.2,\n"events": []\n}\n',
+            'if Input.is_action_pressed("jump"):\n    pass\n',
+        )
+        self.assertEqual(issues, [])
+
+    def test_undeclared_action_raises_warning(self):
+        issues = self._scan_project(
+            '[application]\nconfig/name="Game"\n',
+            'if Input.is_action_pressed("jump"):\n    pass\n',
+        )
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].code, "UNDEFINED_INPUT_ACTION")
+        self.assertEqual(issues[0].severity.value, "WARNING")
+        self.assertIn("jump", issues[0].message)
+
+    def test_builtin_ui_action_skipped(self):
+        issues = self._scan_project(
+            '[application]\nconfig/name="Game"\n',
+            'if Input.is_action_pressed("ui_accept"):\n    pass\n',
+        )
+        self.assertEqual(issues, [])
+
+    def test_no_refs_no_issue(self):
+        issues = self._scan_project(
+            '[input]\njump={\n"events": []\n}\n',
+            "extends Node\n",
+        )
+        self.assertEqual(issues, [])
+
+    def test_deterministic_order(self):
+        issues = self._scan_project(
+            '[application]\nconfig/name="Game"\n',
+            'Input.is_action_pressed("zzz")\nInput.is_action_pressed("aaa")\n',
+        )
+        codes = [i.message for i in issues]
+        self.assertEqual(codes, sorted(codes))
 
 
 if __name__ == "__main__":
