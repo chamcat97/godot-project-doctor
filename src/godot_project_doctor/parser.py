@@ -9,7 +9,7 @@ from godot_project_doctor.models import ProjectSummary
 
 # Matches: key="value" or key=val or key=PackedStringArray(...)
 _KV_RE = re.compile(r'^(\w+)\s*=\s*"?([^"\n]*)"?\s*$')
-_SECTION_RE = re.compile(r'^\[(\w+)\]')
+_SECTION_RE = re.compile(r"^\[(\w+)\]")
 _AUTOLOAD_RE = re.compile(r'^(\w+)\s*=\s*"?\*?res://([^"\n]*)"?')
 
 
@@ -32,10 +32,22 @@ def parse_project_godot(project_root: Path) -> ProjectSummary:
     except OSError:
         return summary
 
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith(";"):
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
             continue
+
+        # Version hint lives in a header comment before any section:
+        #   ; Engine: Godot 4.x  or  ;Engine: Godot 4.x
+        # Must be checked BEFORE the generic comment skip below.
+        if line.startswith(";"):
+            if summary.godot_version_hint is None and (
+                line.startswith("; Engine:") or line.startswith(";Engine:")
+            ):
+                hint = line.lstrip(";").replace("Engine:", "").strip()
+                if hint:
+                    summary.godot_version_hint = hint
+            continue  # skip all comment lines for everything else
 
         # Section header: [application], [autoload], etc.
         section_match = _SECTION_RE.match(line)
@@ -60,11 +72,5 @@ def parse_project_godot(project_root: Path) -> ProjectSummary:
             m = re.match(r'^(\w+)\s*=\s*"?\*?(res://[^"\n]*)"?', line)
             if m:
                 summary.autoloads[m.group(1)] = m.group(2)
-
-        # Grab godot version hint from header comment: ; Engine: Godot 4.x
-        elif line.startswith("; Engine:") or line.startswith(";Engine:"):
-            hint = line.lstrip(";").replace("Engine:", "").strip()
-            if hint:
-                summary.godot_version_hint = hint
 
     return summary

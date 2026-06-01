@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -17,13 +16,14 @@ from godot_project_doctor.scanner import GodotProjectError, scan
 @click.group()
 @click.version_option(version="0.1.0", prog_name="gdoctor")
 def main() -> None:
-    """Godot Project Doctor — a static auditor for Godot 4 projects."""
+    """Godot Project Doctor - a static auditor for Godot 4 projects."""
 
 
 @main.command("scan")
 @click.argument("project_path", type=click.Path(path_type=Path))
 @click.option(
-    "--format", "-f",
+    "--format",
+    "-f",
     "fmt",
     type=click.Choice(["text", "json", "markdown"], case_sensitive=False),
     default="text",
@@ -31,12 +31,13 @@ def main() -> None:
     help="Output format.",
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     type=click.Path(path_type=Path, writable=True),
     default=None,
     help="Write output to this file instead of stdout.",
 )
-def scan_cmd(project_path: Path, fmt: str, output: Optional[Path]) -> None:
+def scan_cmd(project_path: Path, fmt: str, output: Path | None) -> None:
     """Scan a Godot project and report issues."""
     try:
         index = scan(project_path)
@@ -74,7 +75,8 @@ def scan_cmd(project_path: Path, fmt: str, output: Optional[Path]) -> None:
 @main.command("graph")
 @click.argument("project_path", type=click.Path(path_type=Path))
 @click.option(
-    "--format", "-f",
+    "--format",
+    "-f",
     "fmt",
     type=click.Choice(["text", "mermaid"], case_sensitive=False),
     default="text",
@@ -82,12 +84,13 @@ def scan_cmd(project_path: Path, fmt: str, output: Optional[Path]) -> None:
     help="Output format.",
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     type=click.Path(path_type=Path, writable=True),
     default=None,
     help="Write output to this file instead of stdout.",
 )
-def graph_cmd(project_path: Path, fmt: str, output: Optional[Path]) -> None:
+def graph_cmd(project_path: Path, fmt: str, output: Path | None) -> None:
     """Generate a dependency graph from parsed Godot text resources."""
     try:
         index = scan(project_path)
@@ -99,11 +102,7 @@ def graph_cmd(project_path: Path, fmt: str, output: Optional[Path]) -> None:
         sys.exit(1)
 
     graph = build_graph(index)
-
-    if fmt == "mermaid":
-        text = render_mermaid_graph(graph)
-    else:
-        text = render_text_graph(graph)
+    text = render_mermaid_graph(graph) if fmt == "mermaid" else render_text_graph(graph)
 
     if output:
         output.write_text(text, encoding="utf-8")
@@ -115,19 +114,21 @@ def graph_cmd(project_path: Path, fmt: str, output: Optional[Path]) -> None:
 @main.command("context")
 @click.argument("project_path", type=click.Path(path_type=Path))
 @click.option(
-    "--issue", "-i",
+    "--issue",
+    "-i",
     "issue_text",
     default="",
     show_default=False,
     help='Free-text description of the problem (e.g. "game crashes on mobile").',
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     type=click.Path(path_type=Path, writable=True),
     default=None,
     help="Write the report to this file instead of stdout.",
 )
-def context_cmd(project_path: Path, issue_text: str, output: Optional[Path]) -> None:
+def context_cmd(project_path: Path, issue_text: str, output: Path | None) -> None:
     """Generate an AI-friendly Markdown context report."""
     try:
         index = scan(project_path)

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import click
 
-from godot_project_doctor.models import Issue, ScanReport, Severity
+from godot_project_doctor.models import ProjectIndex, ScanReport, Severity
 
 _SEVERITY_COLORS: dict[Severity, str] = {
     Severity.ERROR: "red",
@@ -15,16 +16,33 @@ _SEVERITY_COLORS: dict[Severity, str] = {
     Severity.INFO: "cyan",
 }
 
+# UTF-8 icons used in Markdown / JSON file output (always safe).
 _SEVERITY_ICONS: dict[Severity, str] = {
     Severity.ERROR: "✖",
     Severity.WARNING: "⚠",
     Severity.INFO: "ℹ",
 }
 
+# ASCII fallbacks used for terminal output on narrow-encoding consoles
+# (e.g. Windows CP949 / GBK terminals where the Unicode icons cannot be
+# encoded and would raise UnicodeEncodeError).
+_SEVERITY_ICONS_ASCII: dict[Severity, str] = {
+    Severity.ERROR: "[E]",
+    Severity.WARNING: "[W]",
+    Severity.INFO: "[i]",
+}
 
-def build_report(index: "ProjectIndex") -> ScanReport:  # type: ignore[name-defined]
+
+def _terminal_icons() -> dict[Severity, str]:
+    """Return icon map safe for the current stdout encoding."""
+    enc = (
+        (getattr(sys.stdout, "encoding", None) or "ascii").lower().replace("-", "").replace("_", "")
+    )
+    return _SEVERITY_ICONS if enc in ("utf8", "utf8bom") else _SEVERITY_ICONS_ASCII
+
+
+def build_report(index: ProjectIndex) -> ScanReport:
     """Convert a ProjectIndex into a ScanReport."""
-    from godot_project_doctor.models import ProjectIndex
     return ScanReport(
         schema_version="1.0",
         project_root=index.project_root,
@@ -52,6 +70,7 @@ def render_json(report: ScanReport, output: Path | None = None) -> str:
 
 def render_text(report: ScanReport, output: Path | None = None) -> None:
     """Render a human-readable report to the terminal (or a file)."""
+    icons = _terminal_icons()
     lines: list[str] = []
 
     def _echo(msg: str = "", styled: bool = False) -> None:
@@ -115,7 +134,7 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
             continue
 
         color = _SEVERITY_COLORS[severity]
-        icon = _SEVERITY_ICONS[severity]
+        icon = icons[severity]
         _echo(click.style(f"{icon} {severity.value}", fg=color, bold=True))
 
         for issue in issues_of_level:
@@ -161,9 +180,7 @@ def render_markdown(report: ScanReport, output: Path | None = None) -> str:
         for issue in report.issues:
             icon = _SEVERITY_ICONS[issue.severity]
             loc = f"`{issue.file}` — " if issue.file else ""
-            lines.append(
-                f"- {icon} **{issue.severity.value}** `{issue.code}` {loc}{issue.message}"
-            )
+            lines.append(f"- {icon} **{issue.severity.value}** `{issue.code}` {loc}{issue.message}")
             if issue.details:
                 lines.append(f"  > {issue.details}")
 

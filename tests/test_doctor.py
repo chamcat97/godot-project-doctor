@@ -4,34 +4,29 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-from typing import Optional
 
 # Add src to path for direct test execution
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from godot_project_doctor.checks import run_all_checks
 from godot_project_doctor.context import render_context_markdown
+from godot_project_doctor.gdscript import extract_gdscript_refs
 from godot_project_doctor.graph import build_graph, render_mermaid_graph, render_text_graph
-from godot_project_doctor.indexer import index_project, resolve_res_path
+from godot_project_doctor.indexer import resolve_res_path
 from godot_project_doctor.models import (
     FileStats,
     Issue,
     ProjectIndex,
     ProjectSummary,
-    ResourceRef,
     Severity,
 )
 from godot_project_doctor.parser import parse_project_godot
 from godot_project_doctor.reporter import build_report, render_json
 from godot_project_doctor.scanner import GodotProjectError, scan
 
-
-# ─── Fixture helpers ──────────────────────────────────────────────────────────
-
-import tempfile
-import os
+# ─── Fixture helpers ───────────────────────────────────────────────────────────
 
 
 def _write(path: Path, content: str = "") -> None:
@@ -41,6 +36,7 @@ def _write(path: Path, content: str = "") -> None:
 
 class TempProject:
     """Context manager that creates a temp directory and cleans it up."""
+
     def __init__(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.path = Path(self._tmpdir.name)
@@ -53,7 +49,9 @@ class TempProject:
 
 
 def make_minimal_project(root: Path) -> Path:
-    _write(root / "project.godot", """\
+    _write(
+        root / "project.godot",
+        """\
 ; Engine: Godot 4.x
 [application]
 
@@ -63,42 +61,48 @@ run/main_scene="res://scenes/Main.tscn"
 [autoload]
 
 GameState="res://autoload/GameState.gd"
-""")
+""",
+    )
     return root
 
 
 def make_project_with_valid_ref(root: Path) -> Path:
     _write(root / "project.godot", '[application]\nconfig/name="RefGame"\n')
     _write(root / "player" / "player.gd", "extends CharacterBody2D\n")
-    _write(root / "scenes" / "Player.tscn", """\
+    _write(
+        root / "scenes" / "Player.tscn",
+        """\
 [gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" uid="uid://abc123" path="res://player/player.gd" id="1"]
 
 [node name="Player" type="CharacterBody2D"]
 script = ExtResource("1")
-""")
+""",
+    )
     return root
 
 
 def make_project_with_missing_ref(root: Path) -> Path:
     _write(root / "project.godot", '[application]\nconfig/name="BrokenGame"\n')
-    _write(root / "scenes" / "Main.tscn", """\
+    _write(
+        root / "scenes" / "Main.tscn",
+        """\
 [gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" path="res://scripts/missing.gd" id="1"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1")
-""")
+""",
+    )
     return root
 
 
 def make_project_with_unused_asset(root: Path) -> Path:
     _write(root / "project.godot", '[application]\nconfig/name="AssetGame"\n')
     _write(root / "assets" / "background.png", "PNG")
-    _write(root / "scenes" / "Main.tscn",
-           '[gd_scene format=3]\n\n[node name="Main" type="Node"]\n')
+    _write(root / "scenes" / "Main.tscn", '[gd_scene format=3]\n\n[node name="Main" type="Node"]\n')
     return root
 
 
@@ -270,9 +274,11 @@ class TestUnusedAssetCandidates(unittest.TestCase):
         with TempProject() as root:
             _write(root / "project.godot", '[application]\nconfig/name="X"\n')
             _write(root / "sprites" / "hero.png", "PNG")
-            _write(root / "scenes" / "Game.tscn",
-                   '[gd_scene format=3]\n'
-                   '[ext_resource type="Texture2D" path="res://sprites/hero.png" id="1"]\n')
+            _write(
+                root / "scenes" / "Game.tscn",
+                "[gd_scene format=3]\n"
+                '[ext_resource type="Texture2D" path="res://sprites/hero.png" id="1"]\n',
+            )
             index = scan(root)
             candidates = [i for i in index.issues if i.code == "UNUSED_ASSET_CANDIDATE"]
             self.assertEqual(candidates, [])
@@ -403,14 +409,17 @@ def make_project_simple_graph(root: Path) -> Path:
     """One scene referencing one script."""
     _write(root / "project.godot", '[application]\nconfig/name="SimpleGraph"\n')
     _write(root / "player" / "player.gd", "extends CharacterBody2D\n")
-    _write(root / "scenes" / "Player.tscn", """\
+    _write(
+        root / "scenes" / "Player.tscn",
+        """\
 [gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" uid="uid://abc" path="res://player/player.gd" id="1"]
 
 [node name="Player" type="CharacterBody2D"]
 script = ExtResource("1")
-""")
+""",
+    )
     return root
 
 
@@ -418,9 +427,12 @@ def make_project_multi_ref_graph(root: Path) -> Path:
     """One scene referencing both a Script and a PackedScene."""
     _write(root / "project.godot", '[application]\nconfig/name="MultiRef"\n')
     _write(root / "scripts" / "enemy.gd", "extends Node\n")
-    _write(root / "scenes" / "Bullet.tscn",
-           '[gd_scene format=3]\n\n[node name="Bullet" type="Node"]\n')
-    _write(root / "scenes" / "Enemy.tscn", """\
+    _write(
+        root / "scenes" / "Bullet.tscn", '[gd_scene format=3]\n\n[node name="Bullet" type="Node"]\n'
+    )
+    _write(
+        root / "scenes" / "Enemy.tscn",
+        """\
 [gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/enemy.gd" id="1"]
@@ -428,7 +440,8 @@ def make_project_multi_ref_graph(root: Path) -> Path:
 
 [node name="Enemy" type="Node"]
 script = ExtResource("1")
-""")
+""",
+    )
     return root
 
 
@@ -473,8 +486,10 @@ class TestDependencyGraph(unittest.TestCase):
     def test_empty_project_graph_is_empty(self):
         with TempProject() as root:
             _write(root / "project.godot", '[application]\nconfig/name="Empty"\n')
-            _write(root / "scenes" / "Main.tscn",
-                   '[gd_scene format=3]\n\n[node name="Main" type="Node"]\n')
+            _write(
+                root / "scenes" / "Main.tscn",
+                '[gd_scene format=3]\n\n[node name="Main" type="Node"]\n',
+            )
             index = scan(root)
             graph = build_graph(index)
             self.assertEqual(graph, {})
@@ -545,7 +560,7 @@ class TestDependencyGraph(unittest.TestCase):
 # ─── Context report ───────────────────────────────────────────────────────────
 
 
-def _make_index_with_issues(issues: list) -> "ProjectIndex":
+def _make_index_with_issues(issues: list) -> ProjectIndex:
     """Build a minimal ProjectIndex with the given issues pre-loaded."""
     return ProjectIndex(
         project_root="/fake/project",
@@ -562,7 +577,6 @@ def _make_index_with_issues(issues: list) -> "ProjectIndex":
 
 
 class TestContextReport(unittest.TestCase):
-
     # ── Section headings present ──────────────────────────────────────────────
 
     def test_report_contains_project_summary_heading(self):
@@ -646,18 +660,28 @@ class TestContextReport(unittest.TestCase):
         self.assertIn("No issues found", md)
 
     def test_error_issue_appears_in_report(self):
-        issues = [Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
-                        "External resource not found: res://foo.gd",
-                        file="scenes/Main.tscn")]
+        issues = [
+            Issue(
+                "MISSING_EXT_RESOURCE",
+                Severity.ERROR,
+                "External resource not found: res://foo.gd",
+                file="scenes/Main.tscn",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index)
         self.assertIn("MISSING_EXT_RESOURCE", md)
         self.assertIn("ERROR", md)
 
     def test_warning_issue_appears_in_report(self):
-        issues = [Issue("UNUSED_ASSET_CANDIDATE", Severity.WARNING,
-                        "Asset not referenced: assets/bg.png",
-                        file="assets/bg.png")]
+        issues = [
+            Issue(
+                "UNUSED_ASSET_CANDIDATE",
+                Severity.WARNING,
+                "Asset not referenced: assets/bg.png",
+                file="assets/bg.png",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index)
         self.assertIn("UNUSED_ASSET_CANDIDATE", md)
@@ -665,9 +689,14 @@ class TestContextReport(unittest.TestCase):
     # ── Missing references section ────────────────────────────────────────────
 
     def test_missing_ref_shown_in_section(self):
-        issues = [Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
-                        "External resource not found: res://scripts/missing.gd",
-                        file="scenes/Main.tscn")]
+        issues = [
+            Issue(
+                "MISSING_EXT_RESOURCE",
+                Severity.ERROR,
+                "External resource not found: res://scripts/missing.gd",
+                file="scenes/Main.tscn",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index)
         self.assertIn("res://scripts/missing.gd", md)
@@ -680,18 +709,28 @@ class TestContextReport(unittest.TestCase):
     # ── Large assets section ──────────────────────────────────────────────────
 
     def test_large_texture_shown_in_section(self):
-        issues = [Issue("LARGE_TEXTURE", Severity.WARNING,
-                        "Large texture (4096×4096): assets/hero.png",
-                        file="assets/hero.png")]
+        issues = [
+            Issue(
+                "LARGE_TEXTURE",
+                Severity.WARNING,
+                "Large texture (4096×4096): assets/hero.png",
+                file="assets/hero.png",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index)
         self.assertIn("assets/hero.png", md)
         self.assertIn("Large Assets", md)
 
     def test_large_audio_shown_in_section(self):
-        issues = [Issue("LARGE_AUDIO", Severity.WARNING,
-                        "Large audio file (15.2 MB): audio/music.ogg",
-                        file="audio/music.ogg")]
+        issues = [
+            Issue(
+                "LARGE_AUDIO",
+                Severity.WARNING,
+                "Large audio file (15.2 MB): audio/music.ogg",
+                file="audio/music.ogg",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index)
         self.assertIn("audio/music.ogg", md)
@@ -704,9 +743,14 @@ class TestContextReport(unittest.TestCase):
     # ── Unused assets section ─────────────────────────────────────────────────
 
     def test_unused_asset_shown_in_section(self):
-        issues = [Issue("UNUSED_ASSET_CANDIDATE", Severity.WARNING,
-                        "Asset not referenced: assets/old_bg.png",
-                        file="assets/old_bg.png")]
+        issues = [
+            Issue(
+                "UNUSED_ASSET_CANDIDATE",
+                Severity.WARNING,
+                "Asset not referenced: assets/old_bg.png",
+                file="assets/old_bg.png",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index)
         self.assertIn("assets/old_bg.png", md)
@@ -714,16 +758,20 @@ class TestContextReport(unittest.TestCase):
     # ── Investigation focus: mobile ───────────────────────────────────────────
 
     def test_mobile_focus_mentions_large_textures(self):
-        issues = [Issue("LARGE_TEXTURE", Severity.WARNING,
-                        "Large texture (4096×4096): assets/bg.png",
-                        file="assets/bg.png")]
+        issues = [
+            Issue(
+                "LARGE_TEXTURE",
+                Severity.WARNING,
+                "Large texture (4096×4096): assets/bg.png",
+                file="assets/bg.png",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index, issue_text="game is slow on mobile")
         self.assertIn("Large textures", md)
 
     def test_mobile_focus_mentions_export_presets_when_missing(self):
-        issues = [Issue("NO_EXPORT_PRESETS", Severity.INFO,
-                        "export_presets.cfg not found.")]
+        issues = [Issue("NO_EXPORT_PRESETS", Severity.INFO, "export_presets.cfg not found.")]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index, issue_text="build for android mobile")
         self.assertIn("export presets", md.lower())
@@ -737,18 +785,28 @@ class TestContextReport(unittest.TestCase):
     # ── Investigation focus: missing / broken / reference ─────────────────────
 
     def test_missing_keyword_highlights_missing_refs(self):
-        issues = [Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
-                        "External resource not found: res://player.gd",
-                        file="scenes/Player.tscn")]
+        issues = [
+            Issue(
+                "MISSING_EXT_RESOURCE",
+                Severity.ERROR,
+                "External resource not found: res://player.gd",
+                file="scenes/Player.tscn",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index, issue_text="missing resource error")
         focus = md.split("## Suggested Investigation Focus", 1)[-1]
         self.assertIn("missing external resource", focus.lower())
 
     def test_broken_keyword_highlights_missing_refs(self):
-        issues = [Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
-                        "External resource not found: res://ui.gd",
-                        file="scenes/UI.tscn")]
+        issues = [
+            Issue(
+                "MISSING_EXT_RESOURCE",
+                Severity.ERROR,
+                "External resource not found: res://ui.gd",
+                file="scenes/UI.tscn",
+            )
+        ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index, issue_text="broken scene references")
         focus = md.split("## Suggested Investigation Focus", 1)[-1]
@@ -764,10 +822,10 @@ class TestContextReport(unittest.TestCase):
 
     def test_default_focus_errors_mentioned_first(self):
         issues = [
-            Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
-                  "External resource not found: res://foo.gd"),
-            Issue("UNUSED_ASSET_CANDIDATE", Severity.WARNING,
-                  "Asset not referenced: assets/x.png"),
+            Issue(
+                "MISSING_EXT_RESOURCE", Severity.ERROR, "External resource not found: res://foo.gd"
+            ),
+            Issue("UNUSED_ASSET_CANDIDATE", Severity.WARNING, "Asset not referenced: assets/x.png"),
         ]
         index = _make_index_with_issues(issues)
         md = render_context_markdown(index, issue_text="something odd is happening")
@@ -808,6 +866,367 @@ class TestContextReport(unittest.TestCase):
             self.assertTrue(out.exists())
             content = out.read_text(encoding="utf-8")
             self.assertIn("Project Summary", content)
+
+
+# ─── ext_resource attribute ordering ─────────────────────────────────────────
+
+
+class TestExtResourceAttributeOrdering(unittest.TestCase):
+    """The parser must be order-independent for [ext_resource ...] attributes."""
+
+    def _make_project_with_scene(self, root: Path, header: str) -> None:
+        _write(root / "project.godot", '[application]\nconfig/name="OrderTest"\n')
+        _write(root / "player.gd", "extends Node\n")
+        _write(root / "scenes" / "Main.tscn", f"[gd_scene format=3]\n\n{header}\n")
+
+    def test_standard_order_type_uid_path_id(self):
+        with TempProject() as root:
+            self._make_project_with_scene(
+                root,
+                '[ext_resource type="Script" uid="uid://abc" path="res://player.gd" id="1"]',
+            )
+            index = scan(root)
+            self.assertEqual(len(index.refs), 1)
+            self.assertEqual(index.refs[0].path, "res://player.gd")
+            self.assertEqual(index.refs[0].ref_type, "Script")
+
+    def test_reversed_order_path_id_uid_type(self):
+        with TempProject() as root:
+            self._make_project_with_scene(
+                root,
+                '[ext_resource path="res://player.gd" id="1" uid="uid://abc" type="Script"]',
+            )
+            index = scan(root)
+            self.assertEqual(len(index.refs), 1)
+            self.assertEqual(index.refs[0].path, "res://player.gd")
+            self.assertEqual(index.refs[0].ref_type, "Script")
+            self.assertEqual(index.refs[0].uid, "uid://abc")
+            self.assertEqual(index.refs[0].ref_id, "1")
+
+    def test_no_uid_field(self):
+        with TempProject() as root:
+            self._make_project_with_scene(
+                root,
+                '[ext_resource type="Script" path="res://player.gd" id="1"]',
+            )
+            index = scan(root)
+            self.assertEqual(len(index.refs), 1)
+            self.assertIsNone(index.refs[0].uid)
+
+    def test_id_before_type(self):
+        with TempProject() as root:
+            self._make_project_with_scene(
+                root,
+                '[ext_resource id="2" type="Texture2D" path="res://player.gd"]',
+            )
+            index = scan(root)
+            self.assertEqual(index.refs[0].ref_id, "2")
+            self.assertEqual(index.refs[0].ref_type, "Texture2D")
+
+
+# ─── Relative path ext_resource ──────────────────────────────────────────────
+
+
+class TestRelativePathExtResource(unittest.TestCase):
+    def test_relative_path_resolved_from_declaring_file(self):
+        """A relative ext_resource path is resolved relative to the .tscn file."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="RelPath"\n')
+            # script sits at root/scripts/foo.gd
+            _write(root / "scripts" / "foo.gd", "extends Node\n")
+            # scene sits at root/scenes/Main.tscn and references ../scripts/foo.gd
+            _write(
+                root / "scenes" / "Main.tscn",
+                "[gd_scene format=3]\n\n"
+                '[ext_resource type="Script" path="../scripts/foo.gd" id="1"]\n',
+            )
+            index = scan(root)
+            # Should be no MISSING_EXT_RESOURCE because the file exists
+            missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(missing, [], "Relative path should resolve correctly")
+
+    def test_relative_path_missing_produces_error(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="RelPath"\n')
+            _write(
+                root / "scenes" / "Main.tscn",
+                "[gd_scene format=3]\n\n"
+                '[ext_resource type="Script" path="../scripts/gone.gd" id="1"]\n',
+            )
+            index = scan(root)
+            missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(len(missing), 1)
+
+
+# ─── GDScript static reference extraction ────────────────────────────────────
+
+
+class TestGDScriptRefExtraction(unittest.TestCase):
+    """Unit tests for gdscript.extract_gdscript_refs."""
+
+    def _gd(self, root: Path, name: str, content: str) -> Path:
+        p = root / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_preload_literal_extracted(self):
+        with TempProject() as root:
+            gd = self._gd(root, "player.gd", 'var x = preload("res://assets/hero.png")\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(refs[0].path, "res://assets/hero.png")
+            self.assertEqual(refs[0].ref_type, "preload")
+            self.assertEqual(refs[0].kind, "gdscript")
+
+    def test_load_literal_extracted(self):
+        with TempProject() as root:
+            gd = self._gd(root, "ui.gd", 'var t = load("res://ui/theme.tres")\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(refs[0].path, "res://ui/theme.tres")
+            self.assertEqual(refs[0].ref_type, "load")
+
+    def test_resourceloader_load_extracted(self):
+        with TempProject() as root:
+            gd = self._gd(
+                root,
+                "loader.gd",
+                'var r = ResourceLoader.load("res://data/config.tres")\n',
+            )
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(refs[0].ref_type, "ResourceLoader.load")
+            self.assertEqual(refs[0].path, "res://data/config.tres")
+
+    def test_comment_line_ignored(self):
+        with TempProject() as root:
+            gd = self._gd(root, "foo.gd", '# var x = load("res://scripts/foo.gd")\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(refs, [])
+
+    def test_dynamic_load_variable_ignored(self):
+        with TempProject() as root:
+            gd = self._gd(root, "bar.gd", "var path = my_path\nvar x = load(path)\n")
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(refs, [])
+
+    def test_non_res_path_ignored(self):
+        with TempProject() as root:
+            gd = self._gd(root, "baz.gd", 'var x = load("user://save.dat")\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(refs, [])
+
+    def test_multiple_refs_in_one_file(self):
+        with TempProject() as root:
+            gd = self._gd(
+                root,
+                "multi.gd",
+                'var a = preload("res://a.png")\n'
+                'var b = load("res://b.png")\n'
+                'var c = ResourceLoader.load("res://c.png")\n',
+            )
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(len(refs), 3)
+            paths = {r.path for r in refs}
+            self.assertEqual(paths, {"res://a.png", "res://b.png", "res://c.png"})
+
+
+# ─── GDScript refs integrated into scan ──────────────────────────────────────
+
+
+class TestGDScriptIntegration(unittest.TestCase):
+    """GDScript refs must flow through scan → checks correctly."""
+
+    def test_existing_preload_no_missing_error(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="GDScan"\n')
+            _write(root / "assets" / "hero.png", "PNG")
+            _write(
+                root / "player.gd",
+                'extends Node\nvar t = preload("res://assets/hero.png")\n',
+            )
+            index = scan(root)
+            missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(missing, [])
+
+    def test_missing_load_produces_error(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="GDScan"\n')
+            _write(
+                root / "player.gd",
+                'extends Node\nvar x = load("res://scripts/gone.gd")\n',
+            )
+            index = scan(root)
+            missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(len(missing), 1)
+            self.assertIn("gone.gd", missing[0].message)
+
+    def test_gdscript_preload_suppresses_unused_asset(self):
+        """An image referenced only by GDScript preload() should not be UNUSED."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="GDScan"\n')
+            _write(root / "sprites" / "idle.png", "PNG")
+            _write(
+                root / "player.gd",
+                'extends Node\nvar t = preload("res://sprites/idle.png")\n',
+            )
+            index = scan(root)
+            unused = [i for i in index.issues if i.code == "UNUSED_ASSET_CANDIDATE"]
+            self.assertEqual(unused, [])
+
+    def test_resourceloader_load_appears_in_graph(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="GDScan"\n')
+            _write(root / "data" / "config.tres", "[resource]\n")
+            _write(
+                root / "loader.gd",
+                'extends Node\nvar cfg = ResourceLoader.load("res://data/config.tres")\n',
+            )
+            index = scan(root)
+            graph = build_graph(index)
+            src = next((k for k in graph if "loader.gd" in k), None)
+            self.assertIsNotNone(src, "loader.gd should be a graph source node")
+            self.assertIn("res://data/config.tres", graph[src])
+
+    def test_dynamic_load_no_missing_error(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="GDScan"\n')
+            _write(
+                root / "player.gd",
+                "extends Node\nvar path = get_path()\nvar x = load(path)\n",
+            )
+            index = scan(root)
+            missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(missing, [])
+
+
+# ─── Godot version hint parsing ──────────────────────────────────────────────
+
+
+class TestGodotVersionHint(unittest.TestCase):
+    def test_version_hint_parsed_from_header(self):
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '; Engine: Godot 4.2\n\n[application]\nconfig/name="HintTest"\n',
+            )
+            summary = parse_project_godot(root)
+            self.assertEqual(summary.godot_version_hint, "Godot 4.2")
+
+    def test_version_hint_without_space_after_semicolon(self):
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                ';Engine: Godot 4.3-stable\n\n[application]\nconfig/name="HintTest"\n',
+            )
+            summary = parse_project_godot(root)
+            self.assertEqual(summary.godot_version_hint, "Godot 4.3-stable")
+
+    def test_version_hint_not_overwritten_by_later_comment(self):
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                "; Engine: Godot 4.1\n; Engine: Godot 99.0\n\n[application]\n",
+            )
+            summary = parse_project_godot(root)
+            self.assertEqual(summary.godot_version_hint, "Godot 4.1")
+
+    def test_no_version_hint_returns_none(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="NoHint"\n')
+            summary = parse_project_godot(root)
+            self.assertIsNone(summary.godot_version_hint)
+
+
+# ─── ResourceRef.kind field ───────────────────────────────────────────────────
+
+
+class TestResourceRefKind(unittest.TestCase):
+    def test_ext_resource_kind_is_ext_resource(self):
+        with TempProject() as root:
+            make_project_with_valid_ref(root)
+            index = scan(root)
+            ext_refs = [r for r in index.refs if r.kind == "ext_resource"]
+            self.assertGreater(len(ext_refs), 0)
+
+    def test_gdscript_ref_kind_is_gdscript(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="K"\n')
+            _write(root / "assets" / "x.png", "PNG")
+            _write(root / "s.gd", 'var x = preload("res://assets/x.png")\n')
+            index = scan(root)
+            gd_refs = [r for r in index.refs if r.kind == "gdscript"]
+            self.assertGreater(len(gd_refs), 0)
+
+    def test_json_output_includes_kind_field(self):
+        with TempProject() as root:
+            make_project_with_valid_ref(root)
+            index = scan(root)
+            report = build_report(index)
+            data = json.loads(render_json(report))
+            self.assertIn("kind", data["refs"][0])
+            self.assertEqual(data["refs"][0]["kind"], "ext_resource")
+
+
+# ─── CLI Unicode safety (regression) ─────────────────────────────────────────
+
+
+class TestCliUnicodeSafety(unittest.TestCase):
+    """The terminal text renderer must not raise UnicodeEncodeError on narrow
+    encodings.  We simulate a CP949 stdout by monkey-patching the encoding."""
+
+    def test_ascii_icons_used_for_narrow_encoding(self):
+        from godot_project_doctor.reporter import _SEVERITY_ICONS_ASCII, _terminal_icons
+
+        class _NarrowStream:
+            encoding = "cp949"
+
+        original = sys.stdout
+        try:
+            sys.stdout = _NarrowStream()  # type: ignore[assignment]
+            icons = _terminal_icons()
+        finally:
+            sys.stdout = original
+
+        self.assertEqual(icons, _SEVERITY_ICONS_ASCII)
+
+    def test_utf8_encoding_uses_unicode_icons(self):
+        from godot_project_doctor.reporter import _SEVERITY_ICONS, _terminal_icons
+
+        class _Utf8Stream:
+            encoding = "utf-8"
+
+        original = sys.stdout
+        try:
+            sys.stdout = _Utf8Stream()  # type: ignore[assignment]
+            icons = _terminal_icons()
+        finally:
+            sys.stdout = original
+
+        self.assertEqual(icons, _SEVERITY_ICONS)
+
+    def test_render_text_does_not_raise_on_narrow_encoding(self):
+        """render_text() must complete without raising even with ASCII icons."""
+        from godot_project_doctor.reporter import render_text
+
+        with TempProject() as root:
+            make_project_with_missing_ref(root)
+            index = scan(root)
+            report = build_report(index)
+
+        class _NarrowStream:
+            encoding = "cp949"
+
+        original = sys.stdout
+        try:
+            sys.stdout = _NarrowStream()  # type: ignore[assignment]
+            # Output to a file so click doesn't actually write to the fake stream
+            out = Path(tempfile.mktemp(suffix=".txt"))
+            render_text(report, out)
+            out.unlink(missing_ok=True)
+        finally:
+            sys.stdout = original
 
 
 if __name__ == "__main__":

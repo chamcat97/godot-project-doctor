@@ -39,6 +39,7 @@ def build_graph(index: ProjectIndex) -> Graph:
 # Stable Mermaid node-ID helper
 # ---------------------------------------------------------------------------
 
+
 def _node_id(path: str) -> str:
     """Return a stable, Mermaid-safe identifier derived from *path*.
 
@@ -55,6 +56,7 @@ def _node_id(path: str) -> str:
 # ---------------------------------------------------------------------------
 # Text renderer
 # ---------------------------------------------------------------------------
+
 
 def render_text_graph(graph: Graph) -> str:
     """Render *graph* as a human-readable indented list.
@@ -80,6 +82,7 @@ def render_text_graph(graph: Graph) -> str:
 # ---------------------------------------------------------------------------
 # Mermaid renderer
 # ---------------------------------------------------------------------------
+
 
 def render_mermaid_graph(graph: Graph) -> str:
     """Render *graph* as a Mermaid ``flowchart TD`` diagram.

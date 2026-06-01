@@ -37,20 +37,22 @@ _SHADER_EXTS = frozenset([".shader", ".gdshader"])
 _IMAGE_EXTS = frozenset([".png", ".jpg", ".jpeg", ".webp", ".svg"])
 _AUDIO_EXTS = frozenset([".wav", ".ogg", ".mp3"])
 
-# Regex to match [ext_resource ...] lines in .tscn / .tres
-# Handles both single-line and attribute order variations.
-_EXT_RESOURCE_RE = re.compile(
-    r'\[ext_resource\b'
-    r'(?:[^\]]*\btype="(?P<type>[^"]*)")?'
-    r'(?:[^\]]*\buid="(?P<uid>[^"]*)")?'
-    r'(?:[^\]]*\bpath="(?P<path>[^"]*)")?'
-    r'(?:[^\]]*\bid="(?P<id>[^"]*)")?'
-    r'[^\]]*\]'
-)
+# ── ext_resource parsing (two-pass, order-independent) ───────────────────────
+
+# Pass 1: capture everything between [ext_resource and the closing ]
+_EXT_RESOURCE_BLOCK_RE = re.compile(r"\[ext_resource\b([^\]]*)\]")
+
+# Pass 2: extract key="value" pairs from that block
+_ATTR_KV_RE = re.compile(r'\b(\w+)="([^"]*)"')
 
 
 def _parse_ext_resources(file_path: Path, project_root: Path) -> list[ResourceRef]:
-    """Extract all ext_resource entries from a text scene/resource file."""
+    """Extract all ext_resource entries from a text scene/resource file.
+
+    Attribute order within the ``[ext_resource ...]`` header is irrelevant.
+    Paths that are not ``res://`` absolute are resolved relative to the
+    declaring file's directory (rare in practice but spec-compliant).
+    """
     try:
         text = file_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -59,22 +61,32 @@ def _parse_ext_resources(file_path: Path, project_root: Path) -> list[ResourceRe
     rel = str(file_path.relative_to(project_root))
     refs: list[ResourceRef] = []
 
-    for m in _EXT_RESOURCE_RE.finditer(text):
-        path = m.group("path") or ""
-        ref_type = m.group("type") or ""
-        uid = m.group("uid")
-        ref_id = m.group("id") or ""
+    for block_match in _EXT_RESOURCE_BLOCK_RE.finditer(text):
+        attrs: dict[str, str] = dict(_ATTR_KV_RE.findall(block_match.group(1)))
 
+        path = attrs.get("path", "")
         if not path:
             continue  # skip malformed entries without a path
+
+        # Normalise relative paths to a project-root-relative form.
+        # Godot always writes res:// paths, but we handle the edge case.
+        if not path.startswith("res://") and not path.startswith("uid://"):
+            source_dir = file_path.parent
+            try:
+                resolved_abs = (source_dir / path).resolve()
+                path = "res://" + resolved_abs.relative_to(project_root.resolve()).as_posix()
+            except ValueError:
+                # Path escapes project root — keep raw and let checks report it
+                pass
 
         refs.append(
             ResourceRef(
                 source_file=rel,
-                ref_type=ref_type,
-                uid=uid,
+                ref_type=attrs.get("type", ""),
+                uid=attrs.get("uid"),
                 path=path,
-                ref_id=ref_id,
+                ref_id=attrs.get("id", ""),
+                kind="ext_resource",
             )
         )
 
@@ -82,11 +94,14 @@ def _parse_ext_resources(file_path: Path, project_root: Path) -> list[ResourceRe
 
 
 def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
-    """
-    Walk the project directory and build a ProjectIndex.
+    """Walk the project directory and build a ProjectIndex.
 
-    Parses ext_resource entries from all .tscn and .tres files.
+    Parses ext_resource entries from all ``.tscn`` and ``.tres`` files, and
+    extracts static ``res://`` references from all ``.gd`` files.
     """
+    # Import here to avoid a circular dependency at module load time
+    from godot_project_doctor.gdscript import extract_gdscript_refs
+
     scenes: list[str] = []
     resources: list[str] = []
     scripts: list[str] = []
@@ -113,6 +128,7 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
             all_refs.extend(_parse_ext_resources(path, project_root))
         elif ext in _SCRIPT_EXTS:
             scripts.append(rel)
+            all_refs.extend(extract_gdscript_refs(path, project_root))
         elif ext in _SHADER_EXTS:
             shaders.append(rel)
         elif ext in _IMAGE_EXTS:
@@ -151,19 +167,51 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
 def _walk(root: Path):
     """Yield all files under root, skipping ignored directories."""
     for child in sorted(root.iterdir()):
-        if child.is_dir():
-            if child.name not in _SKIP_DIRS:
-                yield from _walk(child)
-        elif child.is_file():
-            # Skip project.godot itself from the file lists
-            if child.name != "project.godot":
-                yield child
+        if child.is_dir() and child.name not in _SKIP_DIRS:
+            yield from _walk(child)
+        elif child.is_file() and child.name != "project.godot":
+            yield child
 
 
 def resolve_res_path(res_path: str, project_root: Path) -> Path:
-    """Convert a res:// Godot path to an absolute filesystem path."""
+    """Convert a ``res://`` Godot path to an absolute filesystem path.
+
+    For paths that are already project-root-relative (no ``res://`` prefix),
+    the path is treated as relative to the project root.  Use
+    :func:`resolve_ref_path` when the declaring file's location is known.
+    """
     if res_path.startswith("res://"):
-        relative = res_path[len("res://"):]
-        return project_root / relative
-    # Fallback: treat as relative
+        return project_root / res_path[len("res://") :]
     return project_root / res_path
+
+
+def resolve_ref_path(ref_path: str, project_root: Path, source_file: str = "") -> Path | None:
+    """Resolve a resource reference to an absolute filesystem path.
+
+    Parameters
+    ----------
+    ref_path:
+        Raw path from the ``ResourceRef.path`` field.
+    project_root:
+        Absolute path to the Godot project root.
+    source_file:
+        Project-root-relative path of the file that declares the reference.
+        Used to resolve relative (non-``res://``) paths.
+
+    Returns
+    -------
+    Path | None
+        ``None`` when the path uses the ``uid://`` scheme, which cannot be
+        resolved statically without the Godot import cache.
+    """
+    if ref_path.startswith("uid://"):
+        return None  # UID resolution requires the Godot import cache
+
+    if ref_path.startswith("res://"):
+        return project_root / ref_path[len("res://") :]
+
+    # Relative path — resolve from the declaring file's directory
+    if source_file:
+        return (project_root / source_file).parent / ref_path
+
+    return project_root / ref_path

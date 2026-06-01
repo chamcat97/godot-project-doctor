@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from godot_project_doctor.indexer import resolve_res_path
+from godot_project_doctor.indexer import resolve_ref_path
 from godot_project_doctor.models import Issue, ProjectIndex, Severity
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -46,12 +46,12 @@ def _check_missing_export_presets(index: ProjectIndex) -> list[Issue]:
     return []
 
 
-def _check_missing_external_resources(
-    index: ProjectIndex, project_root: Path
-) -> list[Issue]:
+def _check_missing_external_resources(index: ProjectIndex, project_root: Path) -> list[Issue]:
     issues: list[Issue] = []
     for ref in index.refs:
-        real_path = resolve_res_path(ref.path, project_root)
+        real_path = resolve_ref_path(ref.path, project_root, ref.source_file)
+        if real_path is None:
+            continue  # uid:// — can't resolve statically
         if not real_path.exists():
             issues.append(
                 Issue(
@@ -72,7 +72,7 @@ def _check_missing_external_resources(
 def _check_large_textures(index: ProjectIndex, project_root: Path) -> list[Issue]:
     """Warn on raster images wider or taller than LARGE_TEXTURE_DIM pixels."""
     try:
-        from PIL import Image, UnidentifiedImageError  # type: ignore[import]
+        from PIL import Image, UnidentifiedImageError
     except ImportError:
         return []
 
@@ -95,10 +95,10 @@ def _check_large_textures(index: ProjectIndex, project_root: Path) -> list[Issue
                 Issue(
                     code="LARGE_TEXTURE",
                     severity=Severity.WARNING,
-                    message=f"Large texture ({w}×{h}): {rel}",
+                    message=f"Large texture ({w}x{h}): {rel}",
                     file=rel,
                     details=(
-                        f"Image dimensions {w}×{h} exceed the {LARGE_TEXTURE_DIM}px threshold. "
+                        f"Image dimensions {w}x{h} exceed the {LARGE_TEXTURE_DIM}px threshold. "
                         "Consider downscaling or using mipmaps to reduce GPU memory usage."
                     ),
                 )
@@ -132,30 +132,46 @@ def _check_large_audio(index: ProjectIndex, project_root: Path) -> list[Issue]:
     return issues
 
 
-def _check_unused_asset_candidates(
-    index: ProjectIndex, project_root: Path
-) -> list[Issue]:
+def _ref_to_canonical_rel(ref_path: str, source_file: str) -> str | None:
+    """Return the project-root-relative canonical path for a resource reference.
+
+    Returns ``None`` for ``uid://`` paths that cannot be resolved statically.
+    Uses the same rules as :func:`~godot_project_doctor.indexer.resolve_ref_path`:
+
+    * ``res://foo/bar.png`` → ``"foo/bar.png"``
+    * ``../assets/bg.png`` declared in ``scenes/Main.tscn``
+      → ``"assets/bg.png"``
     """
-    Flag asset files that are not referenced by any parsed ext_resource.
+    if ref_path.startswith("uid://"):
+        return None
+    if ref_path.startswith("res://"):
+        return ref_path[len("res://") :]
+    # Relative path: normalise via PurePosixPath arithmetic
+    source_dir = PurePosixPath(source_file.replace("\\", "/")).parent
+    return str(source_dir / ref_path)
+
+
+def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> list[Issue]:
+    """Flag asset files that are not referenced by any parsed ref.
 
     These are *candidates* — GDScript can load assets dynamically, so
     this check produces false positives for runtime-loaded assets.
+    The same canonical-path rules used in the missing-reference check
+    are applied here so that both checks agree on what is "referenced".
     """
-    referenced_res_paths: set[str] = {ref.path for ref in index.refs}
-
-    # Convert all referenced res:// paths to normalised relative strings
     referenced_rel: set[str] = set()
-    for rp in referenced_res_paths:
-        if rp.startswith("res://"):
-            referenced_rel.add(rp[len("res://"):])
+    for ref in index.refs:
+        canonical = _ref_to_canonical_rel(ref.path, ref.source_file)
+        if canonical is not None:
+            # Normalise path separators for cross-platform comparison
+            referenced_rel.add(canonical.replace("\\", "/"))
 
     asset_files = list(index.images) + list(index.audio)
     issues: list[Issue] = []
 
     for rel in asset_files:
-        # Normalize path separators for comparison
-        rel_normalized = rel.replace("\\", "/")
-        if rel_normalized not in referenced_rel:
+        rel_normalised = rel.replace("\\", "/")
+        if rel_normalised not in referenced_rel:
             issues.append(
                 Issue(
                     code="UNUSED_ASSET_CANDIDATE",
@@ -163,7 +179,8 @@ def _check_unused_asset_candidates(
                     message=f"Asset not referenced by any parsed scene or resource: {rel}",
                     file=rel,
                     details=(
-                        "This file was not found in any ext_resource declaration. "
+                        "This file was not found in any ext_resource declaration or "
+                        "static load()/preload() call. "
                         "It may be loaded dynamically via GDScript (load(), preload()), "
                         "or it may be genuinely unused."
                     ),

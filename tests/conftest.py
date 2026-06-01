@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
-
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -109,7 +107,7 @@ def project_with_unused_asset(tmp_path: Path) -> Path:
     # A scene with NO ext_resource entries
     _write(
         tmp_path / "scenes" / "Main.tscn",
-        "[gd_scene format=3]\n\n[node name=\"Main\" type=\"Node\"]\n",
+        '[gd_scene format=3]\n\n[node name="Main" type="Node"]\n',
     )
     return tmp_path
 
@@ -118,5 +116,5 @@ def project_with_unused_asset(tmp_path: Path) -> Path:
 def project_with_export_presets(tmp_path: Path) -> Path:
     """A minimal project that also has export_presets.cfg."""
     _write(tmp_path / "project.godot", '[application]\nconfig/name="ExportGame"\n')
-    _write(tmp_path / "export_presets.cfg", "[preset.0]\nname=\"Windows Desktop\"\n")
+    _write(tmp_path / "export_presets.cfg", '[preset.0]\nname="Windows Desktop"\n')
     return tmp_path

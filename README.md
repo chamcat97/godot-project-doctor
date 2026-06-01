@@ -11,12 +11,16 @@ A deterministic CLI auditor for [Godot 4](https://godotengine.org/) projects.
 ## Features
 
 - Detects missing external resources referenced in `.tscn` / `.tres` files
-- Flags large textures (>2048px) using [Pillow](https://pillow.readthedocs.io/) (optional)
+- Extracts static `preload()` / `load()` / `ResourceLoader.load()` calls from `.gd` scripts
+- Flags large textures (>2048 px) using [Pillow](https://pillow.readthedocs.io/) (optional)
 - Flags large audio files (>10 MB)
-- Identifies unused asset candidates (images/audio not referenced by any scene)
-- Parses `project.godot` for project name, main scene, and autoloads
-- Outputs `text` (Rich), `json`, and `markdown` reports
+- Identifies unused asset candidates (images/audio not referenced by any scene or script)
+- Parses `project.godot` for project name, main scene, autoloads, and Godot version hint
+- Outputs `text` (ANSI colour), `json`, and `markdown` reports
+- Generates dependency graphs (`text` or `mermaid` format)
+- Produces AI-friendly Markdown context reports with deterministic investigation focus
 - Exit code `1` on errors, `0` on clean scans
+- Works on Windows CP949 / other narrow-encoding terminals
 
 ---
 
@@ -36,50 +40,96 @@ pip install "godot-project-doctor[image]"
 
 ## Usage
 
+### `scan` — audit for issues
+
 ```
 gdoctor scan <project_path> [--format text|json|markdown] [--output <path>]
 ```
 
-### Examples
-
 ```bash
-# Print a human-readable report
+# Human-readable terminal report
 gdoctor scan ./my-godot-game
 
-# Export a JSON report for CI or AI agents
+# JSON report for CI or AI agents
 gdoctor scan ./my-godot-game --format json --output report.json
 
 # Markdown report
 gdoctor scan ./my-godot-game --format markdown --output report.md
 ```
 
+### `graph` — dependency graph
+
+```
+gdoctor graph <project_path> [--format text|mermaid] [--output <path>]
+```
+
+Builds a directed graph of `source_file → referenced_resource` edges from all
+parsed `.tscn`, `.tres`, and `.gd` files.  No Godot engine is invoked.
+
+```bash
+# Indented text graph
+gdoctor graph ./my-godot-game
+
+# Mermaid flowchart (paste into GitHub Markdown or Mermaid Live)
+gdoctor graph ./my-godot-game --format mermaid --output graph.md
+```
+
+### `context` — AI-friendly report
+
+```
+gdoctor context <project_path> [--issue "<free text>"] [--output <path>]
+```
+
+Generates a self-contained Markdown document you can paste into ChatGPT,
+Codex, or another coding agent.  The "Suggested Investigation Focus" section
+uses deterministic keyword rules — no external API calls are made.
+
+```bash
+gdoctor context ./my-godot-game --issue "game crashes on Android"
+gdoctor context ./my-godot-game --issue "missing resource on startup" --output ctx.md
+```
+
 ---
 
-## Output formats
+## Output formats (`scan`)
 
 ### `text` (default)
 
-Rich-formatted terminal output with colour-coded issues grouped by severity.
+ANSI colour-coded terminal output, grouped by severity.  Falls back to ASCII
+icons (`[E]`, `[W]`, `[i]`) on narrow-encoding terminals (Windows CP949 / GBK).
 
 ### `json`
 
-Stable, machine-readable JSON suitable for CI pipelines and AI code agents:
+Stable, machine-readable JSON for CI pipelines and AI code agents:
 
 ```json
 {
   "schema_version": "1.0",
   "project_root": "/path/to/game",
   "summary": { "project_name": "My Game", "main_scene": "res://scenes/Main.tscn" },
-  "file_stats": { "scenes": 3, "scripts": 12, ... },
+  "file_stats": { "scenes": 3, "scripts": 12 },
   "issue_counts": { "ERROR": 1, "WARNING": 2, "INFO": 1 },
-  "refs": [ ... ],
-  "issues": [ { "code": "MISSING_EXT_RESOURCE", "severity": "ERROR", ... } ]
+  "refs": [
+    {
+      "source_file": "scenes/Main.tscn",
+      "kind": "ext_resource",
+      "type": "Script",
+      "uid": "uid://abc123",
+      "path": "res://player/player.gd",
+      "id": "1"
+    }
+  ],
+  "issues": [ { "code": "MISSING_EXT_RESOURCE", "severity": "ERROR" } ]
 }
 ```
 
+The `kind` field (added in schema 1.1) is `"ext_resource"` for references
+declared in `[ext_resource ...]` headers and `"gdscript"` for references
+extracted from static GDScript string literals.
+
 ### `markdown`
 
-A simple Markdown report suitable for GitHub issues or documentation.
+Simple Markdown report suitable for GitHub issues or documentation.
 
 ---
 
@@ -87,20 +137,22 @@ A simple Markdown report suitable for GitHub issues or documentation.
 
 | Code | Severity | Description |
 |---|---|---|
-| `MISSING_EXT_RESOURCE` | ERROR | A `.tscn`/`.tres` file references a path that does not exist |
+| `MISSING_EXT_RESOURCE` | ERROR | A `.tscn`/`.tres`/`.gd` file references a path that does not exist |
 | `LARGE_TEXTURE` | WARNING | Raster image exceeds 2048×2048 px (requires Pillow) |
 | `LARGE_AUDIO` | WARNING | Audio file is larger than 10 MB |
-| `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene or resource |
+| `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene, resource, or script |
 | `NO_EXPORT_PRESETS` | INFO | `export_presets.cfg` is absent |
 
-> **Note on `UNUSED_ASSET_CANDIDATE`:** GDScript can load assets dynamically via `load()` or `preload()`, so these are candidates, not guaranteed unused.
+> **Note on `UNUSED_ASSET_CANDIDATE`:** Dynamic `load()` calls with variable
+> paths cannot be detected by static analysis.  Assets loaded that way will
+> still appear as unused candidates.
 
 ---
 
 ## Development
 
 ```bash
-# Install dev dependencies
+# Install dev dependencies (includes mypy, ruff, pytest)
 pip install -e ".[dev]"
 
 # Run tests
@@ -111,16 +163,18 @@ ruff check src tests
 
 # Format
 ruff format src tests
+
+# Type-check
+mypy src/godot_project_doctor
 ```
 
 ---
 
 ## Roadmap
 
-- `gdoctor graph` — dependency graph of scenes and resources
-- `gdoctor context` — generate AI-friendly context summaries
-- Binary `.res`/`.scn` file support
-- GDScript `load()`/`preload()` path extraction
+- Binary `.res`/`.scn` file support (requires Godot binary format parser)
+- GDScript dynamic path heuristics (partial coverage via string concatenation patterns)
+- Scene node tree analysis (orphaned nodes, mismatched node types)
 
 ---
 

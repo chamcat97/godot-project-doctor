@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
-from dataclasses import asdict, dataclass, field
-from enum import Enum
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     ERROR = "ERROR"
     WARNING = "WARNING"
     INFO = "INFO"
@@ -16,13 +15,43 @@ class Severity(str, Enum):
 
 @dataclass
 class ResourceRef:
-    """Represents a parsed [ext_resource ...] entry from a .tscn or .tres file."""
+    """A single external resource reference collected from a project file.
 
-    source_file: str          # relative path within project
-    ref_type: str             # e.g. "Script", "Texture2D"
-    path: str                 # Godot res:// path
-    ref_id: str               # string id within that file
+    Fields
+    ------
+    source_file:
+        Project-root-relative path of the file that declares this reference.
+    ref_type:
+        Godot resource class (e.g. ``"Script"``, ``"Texture2D"``) for
+        ext_resource entries; the calling convention (``"preload"``,
+        ``"load"``, ``"ResourceLoader.load"``) for GDScript static refs.
+    path:
+        Raw resource path as it appears in the source (``res://`` absolute or
+        a relative path for non-GDScript refs).
+    ref_id:
+        Intra-file identifier used by ``[ext_resource]`` entries; empty string
+        for GDScript refs.
+    uid:
+        Godot UID string (``uid://...``) when present; ``None`` otherwise.
+    kind:
+        Origin of the reference.  One of:
+
+        * ``"ext_resource"`` — declared in a ``[ext_resource ...]`` header
+          inside a ``.tscn`` or ``.tres`` file (default).
+        * ``"gdscript"`` — extracted from a static string literal passed to
+          ``preload()``, ``load()``, or ``ResourceLoader.load()`` in a
+          ``.gd`` file.
+
+        Added in schema 1.1.  Consumers that only need the path can ignore
+        this field.
+    """
+
+    source_file: str  # relative path within project
+    ref_type: str  # Godot class or call type
+    path: str  # raw resource path (res:// or relative)
+    ref_id: str  # id within declaring file; "" for GDScript refs
     uid: str | None = None
+    kind: str = "ext_resource"  # "ext_resource" | "gdscript"
 
 
 @dataclass
@@ -60,8 +89,13 @@ class FileStats:
     @property
     def total(self) -> int:
         return (
-            self.scenes + self.resources + self.scripts
-            + self.shaders + self.images + self.audio + self.other
+            self.scenes
+            + self.resources
+            + self.scripts
+            + self.shaders
+            + self.images
+            + self.audio
+            + self.other
         )
 
     def to_dict(self) -> dict[str, int]:
@@ -142,6 +176,7 @@ class ScanReport:
             "refs": [
                 {
                     "source_file": r.source_file,
+                    "kind": r.kind,
                     "type": r.ref_type,
                     "uid": r.uid,
                     "path": r.path,

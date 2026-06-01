@@ -29,6 +29,7 @@ _LIST_CAP = 10
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
+
 def _by_severity(issues: list[Issue], severity: Severity) -> list[Issue]:
     return [i for i in issues if i.severity == severity]
 
@@ -73,7 +74,9 @@ def _investigation_focus(index: ProjectIndex, issue_text: str) -> list[str]:
                 "Downscale to ≤ 1024 px and enable mipmaps where possible."
             )
         else:
-            bullets.append("No large textures detected — texture sizes look appropriate for mobile.")
+            bullets.append(
+                "No large textures detected — texture sizes look appropriate for mobile."
+            )
 
         if large_audio:
             bullets.append(
@@ -82,7 +85,9 @@ def _investigation_focus(index: ProjectIndex, issue_text: str) -> list[str]:
                 "Consider OGG compression or streaming background music."
             )
         else:
-            bullets.append("No oversized audio files detected — audio sizes look acceptable for mobile.")
+            bullets.append(
+                "No oversized audio files detected — audio sizes look acceptable for mobile."
+            )
 
         if no_export:
             bullets.append(
@@ -90,7 +95,9 @@ def _investigation_focus(index: ProjectIndex, issue_text: str) -> list[str]:
                 "(Android / iOS). Set them up in the Godot editor before attempting a build."
             )
         else:
-            bullets.append("Export presets are present — the project has at least one export configuration.")
+            bullets.append(
+                "Export presets are present — the project has at least one export configuration."
+            )
 
         return bullets
 
@@ -109,7 +116,9 @@ def _investigation_focus(index: ProjectIndex, issue_text: str) -> list[str]:
                 ref_path = issue.message.split(": ", 1)[-1]
                 bullets.append(f"  - {loc}→ `{ref_path}`")
             if omitted:
-                bullets.append(f"  - … and {omitted} more (see **Missing References** section above).")
+                bullets.append(
+                    f"  - … and {omitted} more (see **Missing References** section above)."
+                )
         else:
             bullets.append(
                 "No missing external resources found in text-format files. "
@@ -144,6 +153,7 @@ def _investigation_focus(index: ProjectIndex, issue_text: str) -> list[str]:
 
 
 # ── Main renderer ─────────────────────────────────────────────────────────────
+
 
 def render_context_markdown(index: ProjectIndex, issue_text: str = "") -> str:
     """Build and return an AI-friendly Markdown context report.
