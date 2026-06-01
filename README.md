@@ -1,26 +1,28 @@
-# godot-project-doctor [![version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/chamcat97/godot-project-doctor)
+# godot-project-doctor
+
+[![version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/chamcat97/godot-project-doctor)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/chamcat97/godot-project-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/chamcat97/godot-project-doctor/actions)
+<!-- [![PyPI downloads](https://img.shields.io/pypi/dm/godot-project-doctor.svg)](https://pypi.org/project/godot-project-doctor/) TODO: PyPI release activation -->
 
 A deterministic CLI auditor for [Godot 4](https://godotengine.org/) projects.
 
-`godot-project-doctor` scans a Godot project folder, parses project metadata and text-based resource references, detects common issues, and generates human-readable and AI-friendly reports.
+`godot-project-doctor` scans a Godot project folder, parses project metadata and resource references, detects common issues, and generates human-readable and machine-readable reports for CI pipelines and AI agents.
 
-> **Not an AI tool.** This is a pure static analyser — no LLM API calls, no network requests. It produces structured context that is useful for both humans and AI coding agents.
+> **Not an AI tool.** Pure static analysis — no LLM calls, no network requests. Perfect for GitHub Actions, linters, and AI coding workflows.
 
 ---
 
-## Features
+## What it detects
 
-- Detects missing external resources referenced in `.tscn` / `.tres` files
-- Extracts static `preload()` / `load()` / `ResourceLoader.load()` calls from `.gd` scripts
-- Flags large textures (>2048 px) using [Pillow](https://pillow.readthedocs.io/) (optional)
-- Flags large audio files (>10 MB)
-- Identifies unused asset candidates (images/audio not referenced by any scene or script)
-- Parses `project.godot` for project name, main scene, autoloads, and Godot version hint
-- Outputs `text` (ANSI colour), `json`, and `markdown` reports
-- Generates dependency graphs (`text` or `mermaid` format)
-- Produces AI-friendly Markdown context reports with deterministic investigation focus
-- Exit code `1` on errors, `0` on clean scans
-- Works on Windows CP949 / other narrow-encoding terminals
+| Category | Issues |
+|---|---|
+| **Structural** | Circular dependency cycles, missing main scene, missing autoloads |
+| **References** | Missing external resources (scenes, scripts, textures), broken uid:// paths |
+| **Scripts** | Undefined input actions, broken signal connections, unused scripts |
+| **Assets** | Unused scripts/autoloads, unused asset candidates, oversized textures/audio |
+
+**v0.8.0 additions**: Full `uid://` resolution (sidecar + import + cache), SARIF 2.1.0 output, GitHub Action, config-driven severity overrides, unused-script detection.
 
 ---
 
@@ -30,10 +32,28 @@ A deterministic CLI auditor for [Godot 4](https://godotengine.org/) projects.
 pip install godot-project-doctor
 ```
 
-For texture-size checks, install with the optional Pillow dependency:
-
+Optional: For texture-size checks, add Pillow:
 ```bash
 pip install "godot-project-doctor[image]"
+```
+
+---
+
+## Quick start
+
+```bash
+gdoctor scan ./my-game
+```
+
+**Output** (text mode, ANSI-safe on Windows CP949):
+```
+ERROR    MISSING_MAIN_SCENE          project.godot: run/main_scene = res://scenes/Main.tscn (file not found)
+ERROR    CIRCULAR_DEPENDENCY         scenes/Player.tscn → scenes/Level.tscn → scenes/Player.tscn
+WARNING  BROKEN_SIGNAL_CONNECTION    scenes/UI.tscn:[connection] signal=pressed method=_on_clicked (not found in target script)
+WARNING  UNUSED_SCRIPT               player/old_controller.gd (not referenced by any scene/autoload)
+INFO     NO_EXPORT_PRESETS           export_presets.cfg not found
+
+Scanned 12 scenes, 18 scripts. 2 errors, 2 warnings, 1 info.
 ```
 
 ---
@@ -251,6 +271,17 @@ mypy src/godot_project_doctor
 
 ## Roadmap
 
+**Completed (v0.2.1 – v0.8.0)**
+- ✅ Circular dependency detection
+- ✅ Missing resource detection with `uid://` resolution (sidecar, `.import`, `uid_cache.bin`)
+- ✅ Config-driven severity overrides and baseline suppression
+- ✅ SARIF 2.1.0 output for GitHub Code Scanning
+- ✅ GitHub Action for CI/CD integration
+- ✅ Input action validation (GDScript `Input.*` vs `project.godot` `[input]`)
+- ✅ Signal connection validation (`.tscn` signal → target GDScript method)
+- ✅ Unused script and autoload detection
+
+**Future (5.0+)**
 - Binary `.res`/`.scn` file support (requires Godot binary format parser)
 - GDScript dynamic path heuristics (partial coverage via string concatenation patterns)
 - Scene node tree analysis (orphaned nodes, mismatched node types)
