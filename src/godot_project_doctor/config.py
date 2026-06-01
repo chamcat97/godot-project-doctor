@@ -63,11 +63,11 @@ from pathlib import Path
 
 from godot_project_doctor.models import Issue, ProjectIndex, Severity
 
-# ── Default thresholds (kept in sync with checks.py constants) ────────────────
+# Default thresholds (kept in sync with checks.py constants)
 _DEFAULT_LARGE_TEXTURE_DIM: int = 2048
 _DEFAULT_LARGE_AUDIO_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
-# ── Config dataclass ──────────────────────────────────────────────────────────
+# Config dataclass
 
 
 @dataclass
@@ -94,7 +94,7 @@ class Config:
     # Set to False (or pass --include-addons) to audit that code as well.
     ignore_addons: bool = True
 
-    # ── Derived helpers ───────────────────────────────────────────────────────
+    # Derived helpers
 
     def effective_severity(self, code: str, original: Severity) -> Severity | None:
         """Return the effective Severity for *code*, or ``None`` to suppress.
@@ -138,7 +138,7 @@ class Config:
         return False
 
 
-# ── Loader ────────────────────────────────────────────────────────────────────
+# Loader
 
 
 def load_config(
@@ -238,7 +238,7 @@ def _build_config(raw: dict) -> Config:
     return cfg
 
 
-# ── Post-processing ───────────────────────────────────────────────────────────
+# Post-processing
 
 
 def apply_config(index: ProjectIndex, config: Config) -> list[Issue]:

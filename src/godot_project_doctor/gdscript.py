@@ -35,7 +35,7 @@ from pathlib import Path
 
 from godot_project_doctor.models import ResourceRef
 
-# ── Regex ─────────────────────────────────────────────────────────────────────
+# Regex
 #
 # (?<![A-Za-z0-9_])  — negative lookbehind: rejects download(), my_load() etc.
 # (?![A-Za-z0-9_])   — negative lookahead:  rejects preload_cache() etc.
@@ -64,7 +64,7 @@ _INPUT_ACTION_RE = re.compile(
 )
 
 
-# ── Lexical helpers ────────────────────────────────────────────────────────────
+# Lexical helpers
 
 
 def _strip_inline_comment(line: str) -> str:
@@ -119,7 +119,7 @@ def _pos_in_string(line: str, pos: int) -> bool:
     return in_str
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# Public API
 
 
 def extract_gdscript_refs(file_path: Path, project_root: Path) -> list[ResourceRef]:

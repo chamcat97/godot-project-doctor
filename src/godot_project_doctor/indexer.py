@@ -37,7 +37,7 @@ _SHADER_EXTS = frozenset([".shader", ".gdshader"])
 _IMAGE_EXTS = frozenset([".png", ".jpg", ".jpeg", ".webp", ".svg"])
 _AUDIO_EXTS = frozenset([".wav", ".ogg", ".mp3"])
 
-# ── ext_resource parsing (two-pass, order-independent) ───────────────────────
+# ext_resource parsing (two-pass, order-independent)
 
 # Pass 1: capture everything between [ext_resource and the closing ]
 _EXT_RESOURCE_BLOCK_RE = re.compile(r"\[ext_resource\b([^\]]*)\]")

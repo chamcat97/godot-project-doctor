@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 # We skip them to avoid false positives from default engine actions.
 _GODOT_BUILTIN_ACTION_PREFIX = "ui_"
 
-# ── Scene-parsing regexes (BROKEN_SIGNAL_CONNECTION) ─────────────────────────
+# Scene-parsing regexes (BROKEN_SIGNAL_CONNECTION)
 _SC_EXT_RES_RE = re.compile(r"\[ext_resource\b([^\]]*)\]")
 _SC_NODE_RE = re.compile(r"\[node\b([^\]]*)\]")
 _SC_CONN_RE = re.compile(r"\[connection\b([^\]]*)\]")
@@ -26,12 +26,12 @@ _SC_ATTR_RE = re.compile(r'\b(\w+)="([^"]*)"')
 # Matches both quoted ("1_abc") and unquoted (1) ExtResource IDs
 _SC_SCRIPT_PROP_RE = re.compile(r'^script\s*=\s*ExtResource\(\s*"?([^"\)\s]+)"?\s*\)')
 
-# ─── Constants ────────────────────────────────────────────────────────────────
+# Constants
 
 LARGE_TEXTURE_DIM = 2048  # pixels
 LARGE_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 
-# ─── Check runners ────────────────────────────────────────────────────────────
+# Check runners
 
 
 def run_all_checks(index: ProjectIndex, config: Config | None = None) -> list[Issue]:
@@ -65,7 +65,7 @@ def run_all_checks(index: ProjectIndex, config: Config | None = None) -> list[Is
     return issues
 
 
-# ─── Individual checks ────────────────────────────────────────────────────────
+# Individual checks
 
 
 def _check_project_godot_integrity(index: ProjectIndex, project_root: Path) -> list[Issue]:
@@ -84,7 +84,7 @@ def _check_project_godot_integrity(index: ProjectIndex, project_root: Path) -> l
     issues: list[Issue] = []
     summary = index.summary
 
-    # ── main scene ────────────────────────────────────────────────────────────
+    # main scene
     if not summary.main_scene:
         issues.append(
             Issue(
@@ -119,7 +119,7 @@ def _check_project_godot_integrity(index: ProjectIndex, project_root: Path) -> l
                     )
                 )
 
-    # ── autoloads ─────────────────────────────────────────────────────────────
+    # autoloads
     for name, path in sorted(summary.autoloads.items()):
         if path.startswith("uid://"):
             continue  # uid:// — cannot resolve statically

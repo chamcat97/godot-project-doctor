@@ -71,7 +71,7 @@ def build_report(index: ProjectIndex) -> ScanReport:
     )
 
 
-# ─── JSON ─────────────────────────────────────────────────────────────────────
+# JSON
 
 
 def render_json(report: ScanReport, output: Path | None = None) -> str:
@@ -82,7 +82,7 @@ def render_json(report: ScanReport, output: Path | None = None) -> str:
     return text
 
 
-# ─── Text (ANSI via click) ────────────────────────────────────────────────────
+# Text (ANSI via click)
 
 
 def render_text(report: ScanReport, output: Path | None = None) -> None:
@@ -101,7 +101,7 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
         else:
             click.echo(msg)
 
-    # ── Summary ──────────────────────────────────────────────────────────────
+    # Summary
     _echo(click.style("=" * 60, fg="blue"))
     _echo(click.style("  Godot Project Doctor", fg="blue", bold=True))
     _echo(click.style("=" * 60, fg="blue"))
@@ -117,7 +117,7 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
         _echo(f"  Godot:      {report.summary.godot_version_hint}")
     _echo()
 
-    # ── File stats ────────────────────────────────────────────────────────────
+    # File stats
     _echo(click.style("File Counts", bold=True))
     _echo(click.style(glyphs["divider"] * 30, fg="bright_black"))
     stats = report.file_stats
@@ -133,7 +133,7 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
         _echo(f"  {label:<20} {val}")
     _echo()
 
-    # ── Issues ────────────────────────────────────────────────────────────────
+    # Issues
     counts = report.issue_counts
     total = sum(counts.values())
     _echo(click.style("Issues", bold=True))
@@ -170,7 +170,7 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
         output.write_text("\n".join(lines), encoding="utf-8")
 
 
-# ─── Markdown ─────────────────────────────────────────────────────────────────
+# Markdown
 
 
 def render_markdown(report: ScanReport, output: Path | None = None) -> str:
@@ -211,7 +211,7 @@ def render_markdown(report: ScanReport, output: Path | None = None) -> str:
     return text
 
 
-# ─── SARIF 2.1.0 ─────────────────────────────────────────────────────────────
+# SARIF 2.1.0
 
 # Map godot-project-doctor severity → SARIF level
 _SARIF_LEVEL: dict[Severity, str] = {

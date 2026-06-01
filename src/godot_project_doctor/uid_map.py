@@ -70,7 +70,7 @@ _SKIP_DIRS = frozenset(
 )
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# Public API
 
 
 def build_uid_map(
@@ -92,7 +92,7 @@ def build_uid_map(
     # uid_str → list of (res_path, source_name) from all sources
     raw: dict[str, list[tuple[str, str]]] = {}
 
-    # ── source 1: .uid sidecar files ─────────────────────────────────────────
+    # source 1: .uid sidecar files
     for uid_file in _walk_by_suffix(project_root, ".uid"):
         uid_str = _parse_uid_file(uid_file)
         if not uid_str:
@@ -102,19 +102,19 @@ def build_uid_map(
         res_path = f"res://{resource_rel}"
         raw.setdefault(uid_str, []).append((res_path, "uid_sidecar"))
 
-    # ── source 2: .import files ───────────────────────────────────────────────
+    # source 2: .import files
     for import_file in _walk_by_suffix(project_root, ".import"):
         uid_str, source_file = _parse_import_file(import_file)
         if uid_str and source_file:
             raw.setdefault(uid_str, []).append((source_file, "import"))
 
-    # ── source 3: .godot/uid_cache.bin (best-effort) ─────────────────────────
+    # source 3: .godot/uid_cache.bin (best-effort)
     for uid_str, res_path in _try_parse_uid_cache(
         project_root / ".godot" / "uid_cache.bin"
     ).items():
         raw.setdefault(uid_str, []).append((res_path, "uid_cache"))
 
-    # ── merge & deduplicate ───────────────────────────────────────────────────
+    # merge & deduplicate
     uid_map: dict[str, str] = {}
     uid_sources: dict[str, str] = {}
     issues: list[Issue] = []
@@ -157,7 +157,7 @@ def build_uid_map(
     return uid_map, uid_sources, issues
 
 
-# ── Per-source parsers ────────────────────────────────────────────────────────
+# Per-source parsers
 
 
 def _parse_uid_file(path: Path) -> str | None:
@@ -260,7 +260,7 @@ def _try_parse_uid_cache(cache_path: Path) -> dict[str, str]:
     return result
 
 
-# ── Internal helpers ──────────────────────────────────────────────────────────
+# Internal helpers
 
 _UID_RE = re.compile(r"uid://[a-z0-9]+")
 _RES_RE = re.compile(r"res://[^\x00\n\r\"']+")
