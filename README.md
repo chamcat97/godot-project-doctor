@@ -210,7 +210,9 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 | `DUPLICATE_UID` | WARNING | Two or more sources claim the same `uid://` for different files |
 | `BROKEN_SIGNAL_CONNECTION` | WARNING | A `.tscn` signal connection's `method` is not found in the target node's attached GDScript (inherited methods not checked — false-negatives possible) |
 | `UNDEFINED_INPUT_ACTION` | WARNING | GDScript calls `Input.is_action_*()`/`get_action_strength()` with a name not declared in `project.godot` `[input]` (built-in `ui_*` actions excluded) |
+| `UNUSED_AUTOLOAD` | WARNING | Autoload singleton name not referenced in any `.gd` file (access via `get_node('/root/...')` or non-GDScript code are false positives) |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene, resource, or script |
+| `UNUSED_SCRIPT` | WARNING | `.gd` file not referenced by any scene, resource, or autoload (scripts used via string `extends` or dynamically loaded are false positives) |
 | `NO_MAIN_SCENE` | INFO | `run/main_scene` is not configured (may be intentional for library projects) |
 | `NO_EXPORT_PRESETS` | INFO | `export_presets.cfg` is absent |
 

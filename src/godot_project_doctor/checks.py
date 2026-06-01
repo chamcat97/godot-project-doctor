@@ -59,6 +59,8 @@ def run_all_checks(index: ProjectIndex, config: Config | None = None) -> list[Is
     issues.extend(_check_unused_asset_candidates(index, project_root))
     issues.extend(_check_undefined_input_actions(index))
     issues.extend(_check_broken_signal_connections(index, project_root))
+    issues.extend(_check_unused_scripts(index, project_root))
+    issues.extend(_check_unused_autoloads(index, project_root))
 
     return issues
 
@@ -587,4 +589,117 @@ def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> l
                     ),
                 )
             )
+    return issues
+
+
+def _check_unused_scripts(index: ProjectIndex, project_root: Path) -> list[Issue]:
+    """Flag .gd scripts not referenced by any scene, resource, or autoload.
+
+    A script is considered *referenced* if its canonical ``res://`` path
+    appears in at least one of:
+
+    * An ``ext_resource`` declaration in any ``.tscn`` or ``.tres`` file.
+    * A static ``preload()`` / ``load()`` / ``ResourceLoader.load()`` call in
+      any ``.gd`` file.
+    * An autoload entry in ``project.godot``.
+
+    Known false-positive sources (reported in ``details``)
+    -------------------------------------------------------
+    * Scripts used as base classes via ``extends "res://path/to/base.gd"``
+      are not tracked as references.
+    * Tool scripts run by the Godot editor are not distinguishable statically.
+    * Dynamically loaded scripts (``load(variable)``) are not tracked.
+    """
+    referenced: set[str] = set()
+
+    for ref in index.refs:
+        effective = ref.resolved_path if ref.resolved_path else ref.path
+        canonical = _ref_to_canonical_rel(effective, ref.source_file, index.uid_map)
+        if canonical is not None:
+            canonical_norm = canonical.replace("\\", "/")
+            if canonical_norm.endswith(".gd"):
+                referenced.add(canonical_norm)
+
+    # Autoloaded scripts count as referenced
+    for path in index.summary.autoloads.values():
+        if path.startswith("res://"):
+            referenced.add(path[len("res://") :].replace("\\", "/"))
+
+    issues: list[Issue] = []
+    for script in index.scripts:
+        if script.replace("\\", "/") not in referenced:
+            issues.append(
+                Issue(
+                    code="UNUSED_SCRIPT",
+                    severity=Severity.WARNING,
+                    message=f"Script not referenced by any scene, resource, or autoload: {script}",
+                    file=script,
+                    details=(
+                        "This .gd file was not found in any ext_resource declaration, "
+                        "static load()/preload() call, or autoload entry. "
+                        "It may be used as a base class via extends (not tracked), "
+                        "loaded dynamically, or genuinely unused."
+                    ),
+                )
+            )
+    return issues
+
+
+def _check_unused_autoloads(index: ProjectIndex, project_root: Path) -> list[Issue]:
+    """Warn on autoloads declared in project.godot but never referenced by name.
+
+    Each autoload singleton name is searched for as a whole word (``\\b`` boundary)
+    across all ``.gd`` script files.  An autoload that does not appear in any
+    script is reported as potentially unused.
+
+    False-positive / false-negative notes
+    --------------------------------------
+    * If the name appears in a comment or string literal it still counts as
+      "found" (false negative — less intrusive than a false positive).
+    * Access via ``get_node('/root/Name')`` or from non-GDScript code (C#,
+      GDNative) will not be detected (false positive).
+    """
+    autoloads = index.summary.autoloads
+    if not autoloads:
+        return []
+
+    # Compile word-boundary patterns once
+    patterns: dict[str, re.Pattern[str]] = {
+        name: re.compile(r"\b" + re.escape(name) + r"\b") for name in autoloads
+    }
+    name_found: dict[str, bool] = {name: False for name in autoloads}
+
+    for script_rel in index.scripts:
+        abs_path = project_root / script_rel
+        try:
+            text = abs_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        for name, pat in patterns.items():
+            if not name_found[name] and pat.search(text):
+                name_found[name] = True
+
+        if all(name_found.values()):
+            break  # early exit once every autoload is found
+
+    issues: list[Issue] = []
+    for name in sorted(name_found):
+        if name_found[name]:
+            continue
+        path = autoloads[name]
+        issues.append(
+            Issue(
+                code="UNUSED_AUTOLOAD",
+                severity=Severity.WARNING,
+                message=f"Autoload '{name}' is declared but never referenced in any GDScript file",
+                file="project.godot",
+                details=(
+                    f"'{name}' is declared as an autoload (path: {path}) but its name "
+                    "does not appear in any .gd file. "
+                    "If it is accessed via get_node('/root/...') or only from C#/GDNative, "
+                    'suppress with `severity.UNUSED_AUTOLOAD = "none"` in .gdoctor.toml.'
+                ),
+            )
+        )
     return issues

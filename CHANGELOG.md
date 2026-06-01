@@ -8,7 +8,26 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-*(Phase 4d in progress)*
+*(all roadmap phases complete — v0.8.0 is the final Phase 4 release)*
+
+---
+
+## [0.8.0] — 2026-06-01
+
+### Added
+- **`UNUSED_SCRIPT`** (WARNING): flags ``.gd`` files that are not referenced by
+  any ``ext_resource`` declaration, static ``load()``/``preload()`` call, or
+  autoload entry.  Known false-positive sources noted in ``details``: scripts
+  used as base classes via string ``extends``, editor tool scripts, and
+  dynamically loaded scripts.
+- **`UNUSED_AUTOLOAD`** (WARNING): warns when an autoload name declared in
+  ``project.godot`` does not appear as a whole word in any ``.gd`` file.
+  Compiles per-name regex patterns once; exits early when all autoloads are
+  found (O(scripts × unresolved_autoloads)).  Known false-negatives: name found
+  only in comments/strings still counts as "used".
+
+### Changed
+- `__version__` bumped to `"0.8.0"`.
 
 ---
 

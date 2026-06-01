@@ -1372,7 +1372,7 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version_is_0_2_0(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.7.0")
+        self.assertEqual(godot_project_doctor.__version__, "0.8.0")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
@@ -2802,6 +2802,186 @@ class TestBrokenSignalConnectionCheck(unittest.TestCase):
             "extends Node2D\n\n\nfunc _on_button_pressed():\n\tpass\n",
         )
         self.assertEqual(issues, [])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4d — UNUSED_SCRIPT / UNUSED_AUTOLOAD
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestUnusedScriptCheck(unittest.TestCase):
+    """UNUSED_SCRIPT: scripts not referenced by any scene, resource, or autoload."""
+
+    def _run(self, files: dict) -> list:
+        """Build a temp project from *files* dict (relative_path → content) and run the check."""
+        from godot_project_doctor.checks import _check_unused_scripts
+        from godot_project_doctor.indexer import index_project
+        from godot_project_doctor.parser import parse_project_godot
+
+        with TempProject() as root:
+            for rel, content in files.items():
+                _write(root / rel, content)
+            summary = parse_project_godot(root)
+            index = index_project(root, summary)
+            return _check_unused_scripts(index, root)
+
+    def test_script_referenced_in_scene_no_issue(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "player.gd": "extends CharacterBody2D\n",
+                "scenes/Main.tscn": (
+                    '[gd_scene format=3]\n'
+                    '[ext_resource type="Script" path="res://player.gd" id="1"]\n'
+                    '[node name="Player" type="CharacterBody2D"]\n'
+                    'script = ExtResource("1")\n'
+                ),
+            }
+        )
+        unused_codes = [i.code for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertEqual(unused_codes, [])
+
+    def test_orphan_script_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "orphan.gd": "extends Node\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertEqual(len(unused), 1)
+        self.assertIn("orphan.gd", unused[0].message)
+
+    def test_autoloaded_script_not_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": (
+                    '[application]\nconfig/name="Game"\n'
+                    '[autoload]\nGameState="res://game_state.gd"\n'
+                ),
+                "game_state.gd": "extends Node\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertEqual(unused, [])
+
+    def test_preloaded_script_not_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "lib.gd": "class_name Lib\nextends RefCounted\n",
+                "main.gd": 'var L = preload("res://lib.gd")\n',
+            }
+        )
+        # main.gd itself might be flagged (nothing references it), but lib.gd should not be
+        unused_files = [i.file for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertNotIn("lib.gd", unused_files)
+
+    def test_multiple_orphans_all_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "a.gd": "extends Node\n",
+                "b.gd": "extends Node\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertEqual(len(unused), 2)
+
+    def test_severity_is_warning(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "orphan.gd": "extends Node\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertTrue(all(i.severity.value == "WARNING" for i in unused))
+
+
+class TestUnusedAutoloadCheck(unittest.TestCase):
+    """UNUSED_AUTOLOAD: autoloads not referenced in any GDScript file."""
+
+    def _run(self, files: dict) -> list:
+        from godot_project_doctor.checks import _check_unused_autoloads
+        from godot_project_doctor.indexer import index_project
+        from godot_project_doctor.parser import parse_project_godot
+
+        with TempProject() as root:
+            for rel, content in files.items():
+                _write(root / rel, content)
+            summary = parse_project_godot(root)
+            index = index_project(root, summary)
+            return _check_unused_autoloads(index, root)
+
+    def test_autoload_used_in_script_no_issue(self):
+        issues = self._run(
+            {
+                "project.godot": (
+                    '[application]\nconfig/name="Game"\n'
+                    '[autoload]\nGameState="res://game_state.gd"\n'
+                ),
+                "game_state.gd": "extends Node\n",
+                "player.gd": "func _ready():\n\tGameState.reset()\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_AUTOLOAD"]
+        self.assertEqual(unused, [])
+
+    def test_autoload_never_referenced_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": (
+                    '[application]\nconfig/name="Game"\n'
+                    '[autoload]\nDeadCode="res://dead_code.gd"\n'
+                ),
+                "dead_code.gd": "extends Node\n",
+                "player.gd": "extends CharacterBody2D\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_AUTOLOAD"]
+        self.assertEqual(len(unused), 1)
+        self.assertIn("DeadCode", unused[0].message)
+
+    def test_no_autoloads_no_issue(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "player.gd": "extends CharacterBody2D\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_AUTOLOAD"]
+        self.assertEqual(unused, [])
+
+    def test_severity_is_warning(self):
+        issues = self._run(
+            {
+                "project.godot": (
+                    '[application]\nconfig/name="Game"\n'
+                    '[autoload]\nOrphan="res://orphan.gd"\n'
+                ),
+                "orphan.gd": "extends Node\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_AUTOLOAD"]
+        self.assertTrue(all(i.severity.value == "WARNING" for i in unused))
+
+    def test_deterministic_order(self):
+        issues = self._run(
+            {
+                "project.godot": (
+                    '[application]\nconfig/name="Game"\n'
+                    '[autoload]\n'
+                    'Zzz="res://zzz.gd"\n'
+                    'Aaa="res://aaa.gd"\n'
+                ),
+                "zzz.gd": "extends Node\n",
+                "aaa.gd": "extends Node\n",
+            }
+        )
+        unused = [i for i in issues if i.code == "UNUSED_AUTOLOAD"]
+        names = [i.message.split("'")[1] for i in unused]
+        self.assertEqual(names, sorted(names))
 
 
 if __name__ == "__main__":
