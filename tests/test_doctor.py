@@ -1193,6 +1193,60 @@ class TestCliUnicodeSafety(unittest.TestCase):
 
         self.assertEqual(icons, _SEVERITY_ICONS_ASCII)
 
+    def test_ascii_glyphs_used_for_narrow_encoding(self):
+        """Divider / arrow / dash / ok glyphs must be pure ASCII on CP949."""
+        from godot_project_doctor.reporter import _GLYPHS_ASCII, _terminal_glyphs
+
+        class _NarrowStream:
+            encoding = "cp949"
+
+        original = sys.stdout
+        try:
+            sys.stdout = _NarrowStream()  # type: ignore[assignment]
+            glyphs = _terminal_glyphs()
+        finally:
+            sys.stdout = original
+
+        self.assertEqual(glyphs, _GLYPHS_ASCII)
+        for value in glyphs.values():
+            value.encode("cp949")  # raises if not representable
+
+    def test_render_text_terminal_output_cp949_encodable(self):
+        """The full terminal report must be cp949-encodable on a narrow console."""
+        from godot_project_doctor.reporter import build_report, render_text
+
+        # click encodes the message to the stream's cp949 encoding before
+        # writing; any non-encodable box-drawing glyph would raise
+        # UnicodeEncodeError at that point.  Completing without error is the
+        # regression guard.
+        class _NarrowCapture:
+            encoding = "cp949"
+
+            def __init__(self) -> None:
+                self.chunks: list[object] = []
+
+            def write(self, s: object) -> int:
+                self.chunks.append(s)
+                return len(s)  # type: ignore[arg-type]
+
+            def flush(self) -> None:
+                pass
+
+        with TempProject() as root:
+            make_project_with_missing_ref(root)
+            index = scan(root)
+            report = build_report(index)
+
+        captured = _NarrowCapture()
+        original = sys.stdout
+        try:
+            sys.stdout = captured  # type: ignore[assignment]
+            render_text(report)  # terminal mode (no output file)
+        finally:
+            sys.stdout = original
+
+        self.assertTrue(captured.chunks, "render_text produced no terminal output")
+
     def test_utf8_encoding_uses_unicode_icons(self):
         from godot_project_doctor.reporter import _SEVERITY_ICONS, _terminal_icons
 
@@ -1369,10 +1423,10 @@ class TestMermaidGraphStability(unittest.TestCase):
 
 
 class TestVersionConsistency(unittest.TestCase):
-    def test_package_version_is_0_2_0(self):
+    def test_package_version(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.8.0")
+        self.assertEqual(godot_project_doctor.__version__, "0.8.1")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION

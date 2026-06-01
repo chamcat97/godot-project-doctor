@@ -542,7 +542,7 @@ def _check_broken_signal_connections(index: ProjectIndex, project_root: Path) ->
                         f"Connection: signal='{conn['signal']}' from='{conn['from']}' "
                         f"to='{to_raw}' method='{method}'. "
                         f"Script: {script_res_path}. "
-                        "If '{method}' is inherited from a base class, suppress this "
+                        f"If '{method}' is inherited from a base class, suppress this "
                         'warning with `severity.BROKEN_SIGNAL_CONNECTION = "none"` '
                         "in your .gdoctor.toml."
                     ),

@@ -1,9 +1,9 @@
 # godot-project-doctor
 
-[![version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/chamcat97/godot-project-doctor)
+[![PyPI version](https://img.shields.io/pypi/v/godot-project-doctor.svg)](https://pypi.org/project/godot-project-doctor/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/godot-project-doctor.svg)](https://pypi.org/project/godot-project-doctor/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/chamcat97/godot-project-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/chamcat97/godot-project-doctor/actions)
-<!-- [![PyPI downloads](https://img.shields.io/pypi/dm/godot-project-doctor.svg)](https://pypi.org/project/godot-project-doctor/) TODO: PyPI release activation -->
 
 A deterministic CLI auditor for [Godot 4](https://godotengine.org/) projects.
 
@@ -206,7 +206,7 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 
 ```yaml
 # .github/workflows/godot-doctor.yml
-- uses: chamcat97/godot-project-doctor@v0.8.0
+- uses: chamcat97/godot-project-doctor@v0.8.1
   with:
     project-path: .
     fail-on: warning

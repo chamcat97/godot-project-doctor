@@ -32,13 +32,30 @@ _SEVERITY_ICONS_ASCII: dict[Severity, str] = {
     Severity.INFO: "[i]",
 }
 
+# Decorative glyphs used in the terminal report.  Like the severity icons,
+# these must fall back to ASCII on narrow-encoding consoles (CP949 / GBK),
+# otherwise the divider lines / arrows / dashes render as replacement
+# characters ("?") under errors="replace".
+_GLYPHS_UTF8: dict[str, str] = {"divider": "─", "arrow": "→ ", "dash": "—", "ok": "✔"}
+_GLYPHS_ASCII: dict[str, str] = {"divider": "-", "arrow": "-> ", "dash": "-", "ok": "OK"}
 
-def _terminal_icons() -> dict[Severity, str]:
-    """Return icon map safe for the current stdout encoding."""
+
+def _stdout_is_utf8() -> bool:
+    """Return True when the current stdout encoding can represent box-drawing glyphs."""
     enc = (
         (getattr(sys.stdout, "encoding", None) or "ascii").lower().replace("-", "").replace("_", "")
     )
-    return _SEVERITY_ICONS if enc in ("utf8", "utf8bom") else _SEVERITY_ICONS_ASCII
+    return enc in ("utf8", "utf8bom")
+
+
+def _terminal_icons() -> dict[Severity, str]:
+    """Return icon map safe for the current stdout encoding."""
+    return _SEVERITY_ICONS if _stdout_is_utf8() else _SEVERITY_ICONS_ASCII
+
+
+def _terminal_glyphs() -> dict[str, str]:
+    """Return decorative-glyph map safe for the current stdout encoding."""
+    return _GLYPHS_UTF8 if _stdout_is_utf8() else _GLYPHS_ASCII
 
 
 def build_report(index: ProjectIndex) -> ScanReport:
@@ -70,7 +87,11 @@ def render_json(report: ScanReport, output: Path | None = None) -> str:
 
 def render_text(report: ScanReport, output: Path | None = None) -> None:
     """Render a human-readable report to the terminal (or a file)."""
-    icons = _terminal_icons()
+    # File output is always written as UTF-8, so it can use the pretty glyphs.
+    # Terminal output must respect the console encoding (CP949 / GBK fall back).
+    use_utf8 = True if output is not None else _stdout_is_utf8()
+    icons = _SEVERITY_ICONS if use_utf8 else _SEVERITY_ICONS_ASCII
+    glyphs = _GLYPHS_UTF8 if use_utf8 else _GLYPHS_ASCII
     lines: list[str] = []
 
     def _echo(msg: str = "", styled: bool = False) -> None:
@@ -85,8 +106,8 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
     _echo(click.style("  Godot Project Doctor", fg="blue", bold=True))
     _echo(click.style("=" * 60, fg="blue"))
     name = report.summary.project_name or "(unnamed)"
-    main_scene = report.summary.main_scene or "—"
-    autoloads = ", ".join(report.summary.autoloads.keys()) or "—"
+    main_scene = report.summary.main_scene or glyphs["dash"]
+    autoloads = ", ".join(report.summary.autoloads.keys()) or glyphs["dash"]
 
     _echo(f"  Project:    {click.style(name, bold=True)}")
     _echo(f"  Root:       {report.project_root}")
@@ -98,7 +119,7 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
 
     # ── File stats ────────────────────────────────────────────────────────────
     _echo(click.style("File Counts", bold=True))
-    _echo(click.style("─" * 30, fg="bright_black"))
+    _echo(click.style(glyphs["divider"] * 30, fg="bright_black"))
     stats = report.file_stats
     for label, val in [
         ("Scenes (.tscn)", stats.scenes),
@@ -116,10 +137,10 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
     counts = report.issue_counts
     total = sum(counts.values())
     _echo(click.style("Issues", bold=True))
-    _echo(click.style("─" * 30, fg="bright_black"))
+    _echo(click.style(glyphs["divider"] * 30, fg="bright_black"))
 
     if total == 0:
-        _echo(click.style("  ✔ No issues found!", fg="green", bold=True))
+        _echo(click.style(f"  {glyphs['ok']} No issues found!", fg="green", bold=True))
     else:
         err_str = click.style(f"{counts.get('ERROR', 0)} errors", fg="red", bold=True)
         warn_str = click.style(f"{counts.get('WARNING', 0)} warnings", fg="yellow")
@@ -142,7 +163,7 @@ def render_text(report: ScanReport, output: Path | None = None) -> None:
             code_str = click.style(issue.code, fg=color)
             _echo(f"  {code_str}  {loc}{issue.message}")
             if issue.details:
-                _echo(f"    {click.style('→ ' + issue.details, dim=True)}")
+                _echo(f"    {click.style(glyphs['arrow'] + issue.details, dim=True)}")
         _echo()
 
     if output:

@@ -8,7 +8,21 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-*(all roadmap phases complete — v0.8.0 is the final Phase 4 release)*
+---
+
+## [0.8.1] — 2026-06-01
+
+### Fixed
+- **`BROKEN_SIGNAL_CONNECTION`** details message rendered the literal text
+  `{method}` instead of the actual method name (a missing f-string prefix).
+- Terminal `scan` text output used the box-drawing glyphs `─`, `→`, `—`, and
+  `✔`, which garbled to replacement characters on CP949 / GBK consoles under
+  `errors="replace"`.  These now fall back to ASCII (`-`, `-> `, `-`, `OK`) on
+  narrow-encoding terminals, matching the existing severity-icon fallback.
+  File output (`--output`) is always UTF-8 and keeps the Unicode glyphs.
+
+### Changed
+- `__version__` bumped to `"0.8.1"`.
 
 ---
 
@@ -75,7 +89,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.5.0] — 2025-06-02
+## [0.5.0] — 2026-06-01
 
 ### Added
 - **`scan --format sarif`**: SARIF 2.1.0 output suitable for GitHub Code
@@ -94,7 +108,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.4.0] — 2025-06-02
+## [0.4.0] — 2026-06-01
 
 ### Added
 - **Config file support** (`config.py`, Phase 2):
@@ -121,7 +135,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.3.0] — 2025-06-02  *(schema 1.2)*
+## [0.3.0] — 2026-06-01  *(schema 1.2)*
 
 ### Added
 - **`uid://` full resolution** (Phase 1): `uid_map.py` now reads three sources:
@@ -147,7 +161,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.2.1] — 2025-06-02  *(schema 1.1 unchanged)*
+## [0.2.1] — 2026-06-01  *(schema 1.1 unchanged)*
 
 ### Added
 - **`CIRCULAR_DEPENDENCY`** (ERROR): detects cycles in the resource dependency
@@ -175,7 +189,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.2.0] — 2025-06-01
+## [0.2.0] — 2026-06-01
 
 ### Added
 - **`MISSING_MAIN_SCENE`** (ERROR): `run/main_scene` in `project.godot` set but
@@ -203,7 +217,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.1.0] — 2025-06-01  *(initial release)*
+## [0.1.0] — 2026-06-01  *(initial release)*
 
 ### Added
 - `gdoctor scan` command with `text`, `json`, `markdown` output formats.
@@ -212,7 +226,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - `project.godot` metadata parsing.
 - Dependency graph builder and Mermaid/text renderers.
 
-[Unreleased]: https://github.com/chamcat97/godot-project-doctor/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/chamcat97/godot-project-doctor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/chamcat97/godot-project-doctor/releases/tag/v0.1.0
