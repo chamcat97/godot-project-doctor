@@ -2,9 +2,10 @@
 
 [English](README.md) | **한국어**
 
-[![PyPI version](https://img.shields.io/pypi/v/godot-project-doctor.svg)](https://pypi.org/project/godot-project-doctor/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/godot-project-doctor.svg)](https://pypi.org/project/godot-project-doctor/)
+[![PyPI version](https://img.shields.io/pypi/v/godot-project-doctor?logo=pypi&logoColor=white)](https://pypi.org/project/godot-project-doctor/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<!-- Downloads badge: re-add once pepy.tech has indexed the package (a day or two after first release):
+[![Downloads](https://static.pepy.tech/badge/godot-project-doctor)](https://pepy.tech/project/godot-project-doctor) -->
 [![CI](https://github.com/chamcat97/godot-project-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/chamcat97/godot-project-doctor/actions)
 
 [Godot 4](https://godotengine.org/) 프로젝트를 위한 결정론적 CLI 검사 도구입니다.
