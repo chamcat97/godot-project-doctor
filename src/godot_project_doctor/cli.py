@@ -9,10 +9,26 @@ from pathlib import Path
 import click
 
 from godot_project_doctor import __version__
+from godot_project_doctor.config import Config, apply_config, load_config
 from godot_project_doctor.context import render_context_markdown
 from godot_project_doctor.graph import build_graph, render_mermaid_graph, render_text_graph
+from godot_project_doctor.models import Severity
 from godot_project_doctor.reporter import build_report, render_json, render_markdown, render_text
 from godot_project_doctor.scanner import GodotProjectError, scan
+
+# Severity rank used by --fail-on exit-code logic (higher = more severe).
+_SEV_RANK: dict[str, int] = {
+    Severity.ERROR: 3,
+    Severity.WARNING: 2,
+    Severity.INFO: 1,
+}
+# --fail-on value → minimum severity rank that triggers exit 1.
+_FAIL_ON_RANK: dict[str, int] = {
+    "error": 3,
+    "warning": 2,
+    "info": 1,
+    "none": 0,
+}
 
 
 def _ensure_utf8_errors_replace() -> None:
@@ -30,6 +46,17 @@ def _ensure_utf8_errors_replace() -> None:
         if stream is not None and hasattr(stream, "reconfigure"):
             with contextlib.suppress(Exception):
                 stream.reconfigure(errors="replace")
+
+
+def _compute_exit_code(issues: list, fail_on: str) -> int:
+    """Return 1 if any issue meets the *fail_on* threshold, else 0."""
+    threshold = _FAIL_ON_RANK.get(fail_on, 3)
+    if threshold == 0:
+        return 0
+    for issue in issues:
+        if _SEV_RANK.get(issue.severity, 0) >= threshold:
+            return 1
+    return 0
 
 
 @click.group()
@@ -57,16 +84,65 @@ def main() -> None:
     default=None,
     help="Write output to this file instead of stdout.",
 )
-def scan_cmd(project_path: Path, fmt: str, output: Path | None) -> None:
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    default=None,
+    help="Explicit path to a TOML config file.",
+)
+@click.option(
+    "--no-config",
+    is_flag=True,
+    default=False,
+    help="Ignore all config files and use built-in defaults.",
+)
+@click.option(
+    "--fail-on",
+    "fail_on",
+    type=click.Choice(["error", "warning", "info", "none"], case_sensitive=False),
+    default="error",
+    show_default=True,
+    help="Minimum severity that causes a non-zero exit code.",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    default=False,
+    help="Shorthand for --fail-on warning.",
+)
+def scan_cmd(
+    project_path: Path,
+    fmt: str,
+    output: Path | None,
+    config_path: Path | None,
+    no_config: bool,
+    fail_on: str,
+    strict: bool,
+) -> None:
     """Scan a Godot project and report issues."""
+    if strict:
+        fail_on = "warning"
+
+    # Load config (unless suppressed)
+    if no_config:
+        cfg: Config | None = Config()  # pure defaults
+    else:
+        cfg = load_config(project_path.resolve(), config_path)
+
     try:
-        index = scan(project_path)
+        index = scan(project_path, cfg)
     except NotADirectoryError as exc:
         click.echo(click.style(f"Error: {exc}", fg="red", bold=True), err=True)
         sys.exit(2)
     except GodotProjectError as exc:
         click.echo(click.style(f"Error: {exc}", fg="red", bold=True), err=True)
         sys.exit(1)
+
+    # Apply post-processing: ignore / severity override / baseline
+    if cfg is not None:
+        index.issues = apply_config(index, cfg)
 
     report = build_report(index)
 
@@ -87,9 +163,9 @@ def scan_cmd(project_path: Path, fmt: str, output: Path | None) -> None:
     if output:
         click.echo(click.style(f"Report written to {output}", fg="green"), err=True)
 
-    # Exit code 1 if there are any ERRORs
-    if index.issue_counts.get("ERROR", 0) > 0:
-        sys.exit(1)
+    code = _compute_exit_code(index.issues, fail_on)
+    if code:
+        sys.exit(code)
 
 
 @main.command("graph")

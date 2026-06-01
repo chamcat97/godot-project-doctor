@@ -8,7 +8,34 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-*(Phase 2 config file + exit-code policy in progress)*
+*(Phase 3 SARIF + GitHub Action in progress)*
+
+---
+
+## [0.4.0] — 2025-06-02
+
+### Added
+- **Config file support** (`config.py`, Phase 2):
+  - Reads `[tool.gdoctor]` from `pyproject.toml` or `.gdoctor.toml` in the
+    project root.  Keys: `large_texture_dim`, `large_audio_bytes`, `ignore`
+    (glob list), `severity` (per-code override table), `baseline` (list of
+    `{code, file, message}` fingerprints to suppress).
+  - `load_config(project_root, config_path=None)` — TOML loader with
+    graceful fallback to defaults on parse errors.
+  - `apply_config(index, config)` — post-scan filter: ignore globs, baseline
+    suppression, severity overrides (including `"none"` to fully suppress).
+- **CLI exit-code policy** (`scan` subcommand):
+  - `--fail-on {error,warning,info,none}` (default `error`): sets the minimum
+    severity that causes exit code 1.
+  - `--strict`: shorthand for `--fail-on warning`.
+  - `--config <path>`: explicit TOML config file.
+  - `--no-config`: ignore all config files and use built-in defaults.
+- `scan()` accepts an optional `Config` parameter; threshold values
+  (`large_texture_dim`, `large_audio_bytes`) are taken from it when supplied.
+- `run_all_checks()` accepts an optional `Config` parameter for thresholds.
+
+### Changed
+- `__version__` bumped to `"0.4.0"`.
 
 ---
 

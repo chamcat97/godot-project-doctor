@@ -44,6 +44,8 @@ pip install "godot-project-doctor[image]"
 
 ```
 gdoctor scan <project_path> [--format text|json|markdown] [--output <path>]
+              [--fail-on error|warning|info|none] [--strict]
+              [--config <path>] [--no-config]
 ```
 
 ```bash
@@ -55,6 +57,37 @@ gdoctor scan ./my-godot-game --format json --output report.json
 
 # Markdown report
 gdoctor scan ./my-godot-game --format markdown --output report.md
+
+# Fail CI on any WARNING or higher (default: ERROR only)
+gdoctor scan ./my-godot-game --strict
+
+# Suppress exit code entirely (always exits 0)
+gdoctor scan ./my-godot-game --fail-on none
+
+# Use an explicit config file
+gdoctor scan ./my-godot-game --config ci-strict.toml
+```
+
+#### Configuration file
+
+`gdoctor` reads `[tool.gdoctor]` from `pyproject.toml`, or `.gdoctor.toml`
+in the project root.  Use `--no-config` to ignore all config files.
+
+```toml
+# pyproject.toml
+[tool.gdoctor]
+large_texture_dim  = 1024          # warn on textures > 1024 px (default 2048)
+large_audio_bytes  = 5_242_880     # warn on audio > 5 MB (default 10 MB)
+ignore             = ["assets/vendor/**", "*.tmp.gd"]
+
+[tool.gdoctor.severity]
+UNUSED_ASSET_CANDIDATE = "info"    # downgrade to INFO
+NO_EXPORT_PRESETS      = "none"    # suppress entirely
+
+[[tool.gdoctor.baseline]]
+code    = "MISSING_EXT_RESOURCE"
+file    = "scenes/legacy/Old.tscn"
+message = "External resource not found: res://legacy/old.gd"
 ```
 
 ### `graph` — dependency graph

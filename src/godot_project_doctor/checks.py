@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from godot_project_doctor.graph import build_graph, find_cycles
 from godot_project_doctor.indexer import resolve_ref_path
 from godot_project_doctor.models import Issue, ProjectIndex, Severity
+
+if TYPE_CHECKING:
+    from godot_project_doctor.config import Config
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -16,8 +20,19 @@ LARGE_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 # ─── Check runners ────────────────────────────────────────────────────────────
 
 
-def run_all_checks(index: ProjectIndex) -> list[Issue]:
-    """Run every check and return a combined issue list."""
+def run_all_checks(index: ProjectIndex, config: Config | None = None) -> list[Issue]:
+    """Run every check and return a combined issue list.
+
+    Parameters
+    ----------
+    index:
+        Populated project index.
+    config:
+        Optional :class:`~godot_project_doctor.config.Config` instance.
+        When provided, ``large_texture_dim`` and ``large_audio_bytes``
+        thresholds are taken from the config; otherwise the module-level
+        constants are used.
+    """
     issues: list[Issue] = []
     project_root = Path(index.project_root)
 
@@ -25,8 +40,8 @@ def run_all_checks(index: ProjectIndex) -> list[Issue]:
     issues.extend(_check_project_godot_integrity(index, project_root))
     issues.extend(_check_circular_dependencies(index))
     issues.extend(_check_missing_external_resources(index, project_root))
-    issues.extend(_check_large_textures(index, project_root))
-    issues.extend(_check_large_audio(index, project_root))
+    issues.extend(_check_large_textures(index, project_root, config))
+    issues.extend(_check_large_audio(index, project_root, config))
     issues.extend(_check_unused_asset_candidates(index, project_root))
 
     return issues
@@ -179,13 +194,16 @@ def _check_missing_external_resources(index: ProjectIndex, project_root: Path) -
     return issues
 
 
-def _check_large_textures(index: ProjectIndex, project_root: Path) -> list[Issue]:
-    """Warn on raster images wider or taller than LARGE_TEXTURE_DIM pixels."""
+def _check_large_textures(
+    index: ProjectIndex, project_root: Path, config: Config | None = None
+) -> list[Issue]:
+    """Warn on raster images wider or taller than the configured pixel threshold."""
     try:
         from PIL import Image
     except ImportError:
         return []
 
+    dim = config.large_texture_dim if config is not None else LARGE_TEXTURE_DIM
     # Only raster formats; skip SVG
     raster_exts = {".png", ".jpg", ".jpeg", ".webp"}
     issues: list[Issue] = []
@@ -202,7 +220,7 @@ def _check_large_textures(index: ProjectIndex, project_root: Path) -> list[Issue
             # unsupported image files; skip them all rather than crashing.
             continue
 
-        if w > LARGE_TEXTURE_DIM or h > LARGE_TEXTURE_DIM:
+        if w > dim or h > dim:
             issues.append(
                 Issue(
                     code="LARGE_TEXTURE",
@@ -210,7 +228,7 @@ def _check_large_textures(index: ProjectIndex, project_root: Path) -> list[Issue
                     message=f"Large texture ({w}x{h}): {rel}",
                     file=rel,
                     details=(
-                        f"Image dimensions {w}x{h} exceed the {LARGE_TEXTURE_DIM}px threshold. "
+                        f"Image dimensions {w}x{h} exceed the {dim}px threshold. "
                         "Consider downscaling or using mipmaps to reduce GPU memory usage."
                     ),
                 )
@@ -218,8 +236,11 @@ def _check_large_textures(index: ProjectIndex, project_root: Path) -> list[Issue
     return issues
 
 
-def _check_large_audio(index: ProjectIndex, project_root: Path) -> list[Issue]:
-    """Warn on audio files larger than LARGE_AUDIO_BYTES."""
+def _check_large_audio(
+    index: ProjectIndex, project_root: Path, config: Config | None = None
+) -> list[Issue]:
+    """Warn on audio files larger than the configured byte threshold."""
+    limit = config.large_audio_bytes if config is not None else LARGE_AUDIO_BYTES
     issues: list[Issue] = []
     for rel in index.audio:
         abs_path = project_root / rel
@@ -227,7 +248,7 @@ def _check_large_audio(index: ProjectIndex, project_root: Path) -> list[Issue]:
             size = abs_path.stat().st_size
         except OSError:
             continue
-        if size > LARGE_AUDIO_BYTES:
+        if size > limit:
             size_mb = size / (1024 * 1024)
             issues.append(
                 Issue(
@@ -236,7 +257,8 @@ def _check_large_audio(index: ProjectIndex, project_root: Path) -> list[Issue]:
                     message=f"Large audio file ({size_mb:.1f} MB): {rel}",
                     file=rel,
                     details=(
-                        f"File size {size_mb:.1f} MB exceeds the 10 MB threshold. "
+                        f"File size {size_mb:.1f} MB exceeds the "
+                        f"{limit / (1024 * 1024):.0f} MB threshold. "
                         "Consider compressing or streaming this asset."
                     ),
                 )

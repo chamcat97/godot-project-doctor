@@ -1372,7 +1372,7 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version_is_0_2_0(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.3.0")
+        self.assertEqual(godot_project_doctor.__version__, "0.4.0")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
@@ -2130,6 +2130,244 @@ class TestResolvedPathField(unittest.TestCase):
             index = scan(root)
             missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
             self.assertEqual(len(missing), 1)
+
+
+# ─── Phase 2: Config loading ──────────────────────────────────────────────────
+
+
+class TestConfigLoading(unittest.TestCase):
+    """Tests for config.load_config() and Config helpers."""
+
+    def setUp(self) -> None:
+        from godot_project_doctor.config import Config, load_config
+
+        self._load = load_config
+        self._Config = Config
+
+    def test_no_config_file_returns_defaults(self):
+        with TempProject() as root:
+            cfg = self._load(root)
+            self.assertEqual(cfg.large_texture_dim, 2048)
+            self.assertEqual(cfg.large_audio_bytes, 10 * 1024 * 1024)
+            self.assertEqual(cfg.ignore, [])
+            self.assertEqual(cfg.severity_overrides, {})
+            self.assertEqual(cfg.baseline, [])
+
+    def test_pyproject_toml_gdoctor_table_loaded(self):
+        with TempProject() as root:
+            _write(
+                root / "pyproject.toml",
+                "[tool.gdoctor]\nlarge_texture_dim = 512\n",
+            )
+            cfg = self._load(root)
+            self.assertEqual(cfg.large_texture_dim, 512)
+
+    def test_gdoctor_toml_fallback(self):
+        with TempProject() as root:
+            _write(root / ".gdoctor.toml", "large_audio_bytes = 5242880\n")
+            cfg = self._load(root)
+            self.assertEqual(cfg.large_audio_bytes, 5242880)
+
+    def test_pyproject_takes_priority_over_gdoctor_toml(self):
+        with TempProject() as root:
+            _write(root / "pyproject.toml", "[tool.gdoctor]\nlarge_texture_dim = 512\n")
+            _write(root / ".gdoctor.toml", "large_texture_dim = 999\n")
+            cfg = self._load(root)
+            self.assertEqual(cfg.large_texture_dim, 512)
+
+    def test_explicit_config_path_used(self):
+        with TempProject() as root:
+            custom = root / "custom.toml"
+            _write(custom, "large_texture_dim = 256\n")
+            cfg = self._load(root, config_path=custom)
+            self.assertEqual(cfg.large_texture_dim, 256)
+
+    def test_ignore_globs_loaded(self):
+        with TempProject() as root:
+            _write(root / ".gdoctor.toml", 'ignore = ["assets/vendor/**"]\n')
+            cfg = self._load(root)
+            self.assertEqual(cfg.ignore, ["assets/vendor/**"])
+
+    def test_severity_overrides_loaded(self):
+        with TempProject() as root:
+            _write(
+                root / ".gdoctor.toml",
+                '[severity]\nUNUSED_ASSET_CANDIDATE = "info"\n',
+            )
+            cfg = self._load(root)
+            self.assertEqual(cfg.severity_overrides.get("UNUSED_ASSET_CANDIDATE"), "info")
+
+    def test_baseline_loaded(self):
+        with TempProject() as root:
+            _write(
+                root / ".gdoctor.toml",
+                '[[baseline]]\ncode = "MISSING_EXT_RESOURCE"\n'
+                'file = "scenes/Old.tscn"\n'
+                'message = "External resource not found: res://old.gd"\n',
+            )
+            cfg = self._load(root)
+            self.assertEqual(len(cfg.baseline), 1)
+            self.assertEqual(cfg.baseline[0].code, "MISSING_EXT_RESOURCE")
+
+    def test_invalid_toml_silently_falls_back_to_defaults(self):
+        with TempProject() as root:
+            _write(root / ".gdoctor.toml", "this is not valid toml !!!!\n")
+            cfg = self._load(root)
+            self.assertEqual(cfg.large_texture_dim, 2048)  # default
+
+    def test_negative_threshold_ignored(self):
+        with TempProject() as root:
+            _write(root / ".gdoctor.toml", "large_texture_dim = -1\n")
+            cfg = self._load(root)
+            self.assertEqual(cfg.large_texture_dim, 2048)  # default unchanged
+
+
+class TestApplyConfig(unittest.TestCase):
+    """Tests for config.apply_config() post-processing."""
+
+    def setUp(self) -> None:
+        from godot_project_doctor.config import BaselineEntry, Config, apply_config
+
+        self._apply = apply_config
+        self._Config = Config
+        self._Baseline = BaselineEntry
+
+    def _issue(self, code="CODE", sev=Severity.WARNING, file="f.gd", msg="msg"):
+        return Issue(code=code, severity=sev, message=msg, file=file)
+
+    def test_no_filters_passes_all(self):
+        issues = [self._issue(), self._issue("B")]
+        cfg = self._Config()
+        idx = _make_index_with_issues(issues)
+        result = self._apply(idx, cfg)
+        self.assertEqual(len(result), 2)
+
+    def test_ignore_glob_suppresses_matching_file(self):
+        cfg = self._Config(ignore=["assets/**"])
+        idx = _make_index_with_issues([self._issue(file="assets/bg.png")])
+        result = self._apply(idx, cfg)
+        self.assertEqual(result, [])
+
+    def test_ignore_glob_passes_non_matching(self):
+        cfg = self._Config(ignore=["assets/**"])
+        idx = _make_index_with_issues([self._issue(file="scenes/Main.tscn")])
+        result = self._apply(idx, cfg)
+        self.assertEqual(len(result), 1)
+
+    def test_severity_override_changes_level(self):
+        cfg = self._Config(severity_overrides={"CODE": "error"})
+        idx = _make_index_with_issues([self._issue(sev=Severity.WARNING)])
+        result = self._apply(idx, cfg)
+        self.assertEqual(result[0].severity, Severity.ERROR)
+
+    def test_severity_override_none_suppresses(self):
+        cfg = self._Config(severity_overrides={"CODE": "none"})
+        idx = _make_index_with_issues([self._issue()])
+        result = self._apply(idx, cfg)
+        self.assertEqual(result, [])
+
+    def test_baseline_suppresses_matching_issue(self):
+        entry = self._Baseline(code="CODE", file="f.gd", message="msg")
+        cfg = self._Config(baseline=[entry])
+        idx = _make_index_with_issues([self._issue()])
+        result = self._apply(idx, cfg)
+        self.assertEqual(result, [])
+
+    def test_baseline_passes_non_matching(self):
+        entry = self._Baseline(code="OTHER", file="f.gd", message="msg")
+        cfg = self._Config(baseline=[entry])
+        idx = _make_index_with_issues([self._issue()])
+        result = self._apply(idx, cfg)
+        self.assertEqual(len(result), 1)
+
+    def test_original_issues_not_mutated(self):
+        cfg = self._Config(ignore=["f.gd"])
+        orig_issue = self._issue()
+        idx = _make_index_with_issues([orig_issue])
+        self._apply(idx, cfg)
+        self.assertEqual(len(idx.issues), 1)  # original unchanged
+
+
+class TestFailOnExitCode(unittest.TestCase):
+    """Tests for _compute_exit_code() exit-code logic."""
+
+    def setUp(self) -> None:
+        from godot_project_doctor.cli import _compute_exit_code
+
+        self._exit = _compute_exit_code
+
+    def _issues(self, *sevs):
+        return [Issue("C", sev, "msg") for sev in sevs]
+
+    def test_fail_on_error_no_errors_returns_0(self):
+        self.assertEqual(self._exit(self._issues(Severity.WARNING), "error"), 0)
+
+    def test_fail_on_error_with_error_returns_1(self):
+        self.assertEqual(self._exit(self._issues(Severity.ERROR), "error"), 1)
+
+    def test_fail_on_warning_with_warning_returns_1(self):
+        self.assertEqual(self._exit(self._issues(Severity.WARNING), "warning"), 1)
+
+    def test_fail_on_warning_info_only_returns_0(self):
+        self.assertEqual(self._exit(self._issues(Severity.INFO), "warning"), 0)
+
+    def test_fail_on_info_with_any_issue_returns_1(self):
+        self.assertEqual(self._exit(self._issues(Severity.INFO), "info"), 1)
+
+    def test_fail_on_none_always_returns_0(self):
+        self.assertEqual(self._exit(self._issues(Severity.ERROR), "none"), 0)
+
+    def test_empty_issues_always_0(self):
+        self.assertEqual(self._exit([], "error"), 0)
+        self.assertEqual(self._exit([], "warning"), 0)
+
+
+class TestConfigIntegration(unittest.TestCase):
+    """End-to-end: config thresholds flow through scan() correctly."""
+
+    def test_ignore_suppresses_issue_after_scan(self):
+        """An ignored file's issues must not appear in apply_config output."""
+        from godot_project_doctor.config import Config, apply_config
+
+        with TempProject() as root:
+            make_project_with_missing_ref(root)
+            index = scan(root)
+            cfg = Config(ignore=["scenes/**"])
+            filtered = apply_config(index, cfg)
+            missing = [i for i in filtered if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(missing, [])
+
+    def test_severity_override_in_scan(self):
+        """Severity override changes issue level in apply_config output."""
+        from godot_project_doctor.config import Config, apply_config
+
+        with TempProject() as root:
+            make_project_with_missing_ref(root)
+            index = scan(root)
+            cfg = Config(severity_overrides={"MISSING_EXT_RESOURCE": "warning"})
+            filtered = apply_config(index, cfg)
+            errors = [i for i in filtered if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0].severity, Severity.WARNING)
+
+    def test_no_config_preserves_default_behavior(self):
+        """scan() with no config uses the same defaults as before."""
+        with TempProject() as root:
+            make_minimal_project(root)
+            index = scan(root)
+            self.assertIsNotNone(index)
+
+    def test_cp949_subprocess_with_fail_on(self):
+        """--fail-on none must exit 0 even with errors on CP949 terminal."""
+        with TempProject() as root:
+            make_project_with_missing_ref(root)
+            result = _run_cp949(["scan", str(root), "--fail-on", "none"])
+            self._assert_no_traceback(result)
+            self.assertEqual(result.returncode, 0)
+
+    def _assert_no_traceback(self, result):
+        combined = result.stdout + result.stderr
+        self.assertNotIn("Traceback", combined, combined[:800])
 
 
 if __name__ == "__main__":
