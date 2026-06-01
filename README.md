@@ -283,7 +283,7 @@ mypy src/godot_project_doctor
 - ✅ Signal connection validation (`.tscn` signal → target GDScript method)
 - ✅ Unused script and autoload detection
 
-**Future (5.0+)**
+**Future**
 - Binary `.res`/`.scn` file support (requires Godot binary format parser)
 - GDScript dynamic path heuristics (partial coverage via string concatenation patterns)
 - Scene node tree analysis (orphaned nodes, mismatched node types)
