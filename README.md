@@ -143,13 +143,16 @@ Simple Markdown report suitable for GitHub issues or documentation.
 | `MISSING_EXT_RESOURCE` | ERROR | A `.tscn`/`.tres`/`.gd` file references a path that does not exist |
 | `LARGE_TEXTURE` | WARNING | Raster image exceeds 2048×2048 px (requires Pillow) |
 | `LARGE_AUDIO` | WARNING | Audio file is larger than 10 MB |
+| `DUPLICATE_UID` | WARNING | Two `.uid` sidecar files claim the same `uid://` string |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene, resource, or script |
 | `NO_MAIN_SCENE` | INFO | `run/main_scene` is not configured (may be intentional for library projects) |
 | `NO_EXPORT_PRESETS` | INFO | `export_presets.cfg` is absent |
 
-> **Note on `uid://` paths:** Godot 4 uses `uid://` UIDs for some references.
-> These cannot be resolved without the Godot import cache and are skipped
-> rather than generating false-positive errors.
+> **`uid://` paths**: When `*.uid` sidecar files are present alongside resources,
+> `gdoctor` resolves `uid://` references to the corresponding `res://` path and
+> includes them in missing-reference and unused-asset checks.  UIDs without a
+> matching sidecar are silently skipped to avoid false-positive errors.
+> `*.import` files and the binary `.godot/uid_cache.bin` are not yet parsed.
 
 > **Note on `UNUSED_ASSET_CANDIDATE`:** Dynamic `load()` calls with variable
 > paths cannot be detected by static analysis.  Assets loaded that way will

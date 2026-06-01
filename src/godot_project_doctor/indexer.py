@@ -96,11 +96,13 @@ def _parse_ext_resources(file_path: Path, project_root: Path) -> list[ResourceRe
 def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
     """Walk the project directory and build a ProjectIndex.
 
-    Parses ext_resource entries from all ``.tscn`` and ``.tres`` files, and
-    extracts static ``res://`` references from all ``.gd`` files.
+    Parses ext_resource entries from all ``.tscn`` and ``.tres`` files,
+    extracts static ``res://`` references from all ``.gd`` files, and builds
+    a ``uid:// → res://`` mapping from ``.uid`` sidecar files.
     """
-    # Import here to avoid a circular dependency at module load time
+    # Import here to avoid circular dependencies at module load time
     from godot_project_doctor.gdscript import extract_gdscript_refs
+    from godot_project_doctor.uid_map import build_uid_map
 
     scenes: list[str] = []
     resources: list[str] = []
@@ -148,7 +150,9 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
         other=len(other_files),
     )
 
-    return ProjectIndex(
+    uid_map, uid_issues = build_uid_map(project_root)
+
+    index = ProjectIndex(
         project_root=str(project_root),
         summary=summary,
         file_stats=file_stats,
@@ -161,7 +165,10 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
         other_files=sorted(other_files),
         has_export_presets=has_export_presets,
         refs=all_refs,
+        uid_map=uid_map,
     )
+    index.issues.extend(uid_issues)
+    return index
 
 
 def _walk(root: Path):
@@ -185,7 +192,12 @@ def resolve_res_path(res_path: str, project_root: Path) -> Path:
     return project_root / res_path
 
 
-def resolve_ref_path(ref_path: str, project_root: Path, source_file: str = "") -> Path | None:
+def resolve_ref_path(
+    ref_path: str,
+    project_root: Path,
+    source_file: str = "",
+    uid_map: dict[str, str] | None = None,
+) -> Path | None:
     """Resolve a resource reference to an absolute filesystem path.
 
     Parameters
@@ -197,15 +209,23 @@ def resolve_ref_path(ref_path: str, project_root: Path, source_file: str = "") -
     source_file:
         Project-root-relative path of the file that declares the reference.
         Used to resolve relative (non-``res://``) paths.
+    uid_map:
+        Optional mapping of ``uid://`` → ``res://`` paths built from ``.uid``
+        sidecar files.  When provided, ``uid://`` references that appear in
+        the map are resolved to their ``res://`` counterpart; unrecognised
+        UIDs are still skipped (returns ``None``) to avoid false positives.
 
     Returns
     -------
     Path | None
-        ``None`` when the path uses the ``uid://`` scheme, which cannot be
-        resolved statically without the Godot import cache.
+        ``None`` when the path uses an unresolvable ``uid://`` scheme.
     """
     if ref_path.startswith("uid://"):
-        return None  # UID resolution requires the Godot import cache
+        if uid_map:
+            resolved = uid_map.get(ref_path)
+            if resolved and resolved.startswith("res://"):
+                return project_root / resolved[len("res://") :]
+        return None  # UID not in map — skip to avoid false positives
 
     if ref_path.startswith("res://"):
         return project_root / ref_path[len("res://") :]

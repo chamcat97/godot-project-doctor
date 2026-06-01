@@ -157,9 +157,9 @@ def _check_missing_export_presets(index: ProjectIndex) -> list[Issue]:
 def _check_missing_external_resources(index: ProjectIndex, project_root: Path) -> list[Issue]:
     issues: list[Issue] = []
     for ref in index.refs:
-        real_path = resolve_ref_path(ref.path, project_root, ref.source_file)
+        real_path = resolve_ref_path(ref.path, project_root, ref.source_file, index.uid_map)
         if real_path is None:
-            continue  # uid:// — can't resolve statically
+            continue  # uid:// not in map — skip to avoid false positives
         if not real_path.exists():
             issues.append(
                 Issue(
@@ -267,7 +267,11 @@ def _normalize_posix(path: str) -> str:
     return "/".join(parts)
 
 
-def _ref_to_canonical_rel(ref_path: str, source_file: str) -> str | None:
+def _ref_to_canonical_rel(
+    ref_path: str,
+    source_file: str,
+    uid_map: dict[str, str] | None = None,
+) -> str | None:
     """Return the project-root-relative canonical path for a resource reference.
 
     Returns ``None`` for ``uid://`` paths that cannot be resolved statically.
@@ -276,8 +280,14 @@ def _ref_to_canonical_rel(ref_path: str, source_file: str) -> str | None:
     * ``res://foo/bar.png`` → ``"foo/bar.png"``
     * ``../assets/bg.png`` declared in ``scenes/Main.tscn``
       → ``"assets/bg.png"``  (``..`` is resolved — no ``PurePosixPath`` leftover)
+    * ``uid://abc123`` with a matching entry in *uid_map*
+      → the canonical relative path of the mapped resource
     """
     if ref_path.startswith("uid://"):
+        if uid_map:
+            resolved = uid_map.get(ref_path)
+            if resolved and resolved.startswith("res://"):
+                return resolved[len("res://") :]
         return None
     if ref_path.startswith("res://"):
         return ref_path[len("res://") :]
@@ -298,7 +308,7 @@ def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> l
     """
     referenced_rel: set[str] = set()
     for ref in index.refs:
-        canonical = _ref_to_canonical_rel(ref.path, ref.source_file)
+        canonical = _ref_to_canonical_rel(ref.path, ref.source_file, index.uid_map)
         if canonical is not None:
             # Normalise path separators for cross-platform comparison
             referenced_rel.add(canonical.replace("\\", "/"))

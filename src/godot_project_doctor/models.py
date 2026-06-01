@@ -150,6 +150,9 @@ class ProjectIndex:
     has_export_presets: bool = False
     refs: list[ResourceRef] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
+    # uid:// → res:// mapping built from .uid sidecar files.
+    # Not included in JSON output (can be large; internal use only).
+    uid_map: dict[str, str] = field(default_factory=dict)
 
     @property
     def issue_counts(self) -> dict[str, int]:

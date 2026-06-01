@@ -15,6 +15,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - `graph.find_cycles()`: public API for cycle detection, normalises
   project-relative and `res://` paths before comparison.
 - `graph._to_res_path()`: internal helper that normalises both path forms.
+- **`uid://` sidecar resolution**: new `uid_map.py` module reads `*.uid`
+  sidecar files to build a `uid:// → res://` mapping.  `ProjectIndex` now
+  carries a `uid_map` field (internal; not serialised to JSON).
+  `resolve_ref_path()` and `_ref_to_canonical_rel()` accept an optional
+  `uid_map` and resolve recognised UIDs instead of silently skipping them,
+  reducing false negatives in missing-reference and unused-asset checks.
+- **`DUPLICATE_UID`** (WARNING): emitted when two `*.uid` sidecar files
+  claim the same `uid://` string.
 
 ### Fixed
 - `_ref_to_canonical_rel`: relative paths containing `..` (e.g. `../assets/bg.png`)
