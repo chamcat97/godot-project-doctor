@@ -174,6 +174,27 @@ via a `.uid` sidecar, `.import` file, or `uid_cache.bin`.
 
 Simple Markdown report suitable for GitHub issues or documentation.
 
+### `sarif`
+
+[SARIF 2.1.0](https://sarifweb.azurewebsites.net/) for GitHub Code Scanning:
+
+```bash
+gdoctor scan ./my-godot-game --format sarif --output gdoctor.sarif
+```
+
+Use the bundled **GitHub Action** to scan and upload in one step:
+
+```yaml
+# .github/workflows/godot-doctor.yml
+- uses: chamcat97/godot-project-doctor@v0.5.0
+  with:
+    project-path: .
+    fail-on: warning
+    upload-sarif: "true"
+  permissions:
+    security-events: write
+```
+
 ---
 
 ## Checks

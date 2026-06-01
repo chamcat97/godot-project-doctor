@@ -8,7 +8,26 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-*(Phase 3 SARIF + GitHub Action in progress)*
+*(Phase 4 deep checks in progress)*
+
+---
+
+## [0.5.0] — 2025-06-02
+
+### Added
+- **`scan --format sarif`**: SARIF 2.1.0 output suitable for GitHub Code
+  Scanning (`github/codeql-action/upload-sarif`).
+  - `ruleId` ← `issue.code`; `level` ← `error`/`warning`/`note`
+  - `physicalLocation.uri` with `%SRCROOT%` base; backslashes normalised
+  - Rules deduplicated and sorted by `id`; results sorted by `(ruleId, uri,
+    message)` for determinism
+- **`action.yml`**: composite GitHub Action that installs
+  `godot-project-doctor`, runs `scan --format sarif`, and optionally uploads
+  to GitHub Code Scanning.  Inputs: `project-path`, `fail-on`, `sarif-output`,
+  `upload-sarif`, `extra-args`.
+
+### Changed
+- `__version__` bumped to `"0.5.0"`.
 
 ---
 

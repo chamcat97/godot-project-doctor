@@ -1372,7 +1372,7 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version_is_0_2_0(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.4.0")
+        self.assertEqual(godot_project_doctor.__version__, "0.5.0")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
@@ -2368,6 +2368,113 @@ class TestConfigIntegration(unittest.TestCase):
     def _assert_no_traceback(self, result):
         combined = result.stdout + result.stderr
         self.assertNotIn("Traceback", combined, combined[:800])
+
+
+# ─── Phase 3: SARIF output ────────────────────────────────────────────────────
+
+
+class TestSarifOutput(unittest.TestCase):
+    """Tests for reporter.render_sarif()."""
+
+    def setUp(self) -> None:
+        from godot_project_doctor.reporter import render_sarif
+
+        self._render = render_sarif
+
+    def _sarif(self, issues):
+        idx = _make_index_with_issues(issues)
+        report = build_report(idx)
+        return json.loads(self._render(report))
+
+    def test_sarif_version_is_2_1_0(self):
+        self.assertEqual(self._sarif([])["version"], "2.1.0")
+
+    def test_sarif_has_runs(self):
+        self.assertEqual(len(self._sarif([])["runs"]), 1)
+
+    def test_tool_name_present(self):
+        driver = self._sarif([])["runs"][0]["tool"]["driver"]
+        self.assertEqual(driver["name"], "godot-project-doctor")
+
+    def test_no_issues_empty_results(self):
+        self.assertEqual(self._sarif([])["runs"][0]["results"], [])
+
+    def test_error_maps_to_sarif_error(self):
+        r = self._sarif([Issue("X", Severity.ERROR, "m")])["runs"][0]["results"][0]
+        self.assertEqual(r["level"], "error")
+
+    def test_warning_maps_to_sarif_warning(self):
+        r = self._sarif([Issue("X", Severity.WARNING, "m")])["runs"][0]["results"][0]
+        self.assertEqual(r["level"], "warning")
+
+    def test_info_maps_to_sarif_note(self):
+        r = self._sarif([Issue("X", Severity.INFO, "m")])["runs"][0]["results"][0]
+        self.assertEqual(r["level"], "note")
+
+    def test_rule_id_equals_issue_code(self):
+        r = self._sarif([Issue("MY_CODE", Severity.WARNING, "m")])["runs"][0]["results"][0]
+        self.assertEqual(r["ruleId"], "MY_CODE")
+
+    def test_rule_defined_in_rules(self):
+        doc = self._sarif([Issue("MY_CODE", Severity.WARNING, "m")])
+        ids = [r["id"] for r in doc["runs"][0]["tool"]["driver"]["rules"]]
+        self.assertIn("MY_CODE", ids)
+
+    def test_file_location_in_result(self):
+        r = self._sarif([Issue("X", Severity.ERROR, "m", file="scenes/Main.tscn")])["runs"][0][
+            "results"
+        ][0]
+        uri = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        self.assertEqual(uri, "scenes/Main.tscn")
+
+    def test_backslash_normalised_in_uri(self):
+        r = self._sarif([Issue("X", Severity.ERROR, "m", file="scenes\\Main.tscn")])["runs"][0][
+            "results"
+        ][0]
+        uri = r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        self.assertNotIn("\\", uri)
+
+    def test_no_file_no_locations(self):
+        r = self._sarif([Issue("X", Severity.ERROR, "m", file=None)])["runs"][0]["results"][0]
+        self.assertNotIn("locations", r)
+
+    def test_results_sorted_deterministically(self):
+        issues_a = [
+            Issue("Z_CODE", Severity.ERROR, "z", file="b.gd"),
+            Issue("A_CODE", Severity.WARNING, "a", file="a.gd"),
+        ]
+        issues_b = list(reversed(issues_a))
+        ra = self._sarif(issues_a)["runs"][0]["results"]
+        rb = self._sarif(issues_b)["runs"][0]["results"]
+        self.assertEqual(ra, rb)
+
+    def test_rules_sorted_by_id(self):
+        doc = self._sarif([Issue("Z", Severity.WARNING, "z"), Issue("A", Severity.ERROR, "a")])
+        ids = [r["id"] for r in doc["runs"][0]["tool"]["driver"]["rules"]]
+        self.assertEqual(ids, sorted(ids))
+
+    def test_sarif_written_to_file(self):
+        with TempProject() as root:
+            make_minimal_project(root)
+            idx = scan(root)
+            report = build_report(idx)
+            out = root / "results.sarif"
+            self._render(report, out)
+            self.assertTrue(out.exists())
+            data = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(data["version"], "2.1.0")
+
+    def test_scan_format_sarif_subprocess(self):
+        """gdoctor scan --format sarif must produce valid SARIF on CP949 terminal."""
+        with TempProject() as root:
+            make_minimal_project(root)
+            result = _run_cp949(["scan", str(root), "--format", "sarif", "--fail-on", "none"])
+            self.assertNotIn("Traceback", result.stderr + result.stdout)
+            try:
+                doc = json.loads(result.stdout)
+                self.assertEqual(doc["version"], "2.1.0")
+            except json.JSONDecodeError:
+                self.fail(f"Not valid JSON: {result.stdout[:300]}")
 
 
 if __name__ == "__main__":

@@ -188,3 +188,99 @@ def render_markdown(report: ScanReport, output: Path | None = None) -> str:
     if output:
         output.write_text(text, encoding="utf-8")
     return text
+
+
+# ─── SARIF 2.1.0 ─────────────────────────────────────────────────────────────
+
+# Map godot-project-doctor severity → SARIF level
+_SARIF_LEVEL: dict[Severity, str] = {
+    Severity.ERROR: "error",
+    Severity.WARNING: "warning",
+    Severity.INFO: "note",
+}
+
+# Tool metadata embedded in every SARIF run
+_TOOL_NAME = "godot-project-doctor"
+_TOOL_URI = "https://github.com/chamcat97/godot-project-doctor"
+_SARIF_VERSION = "2.1.0"
+_SARIF_SCHEMA = (
+    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+)
+
+
+def render_sarif(report: ScanReport, output: Path | None = None) -> str:
+    """Render the report as a SARIF 2.1.0 document.
+
+    The output is suitable for upload to GitHub Code Scanning via
+    ``github/codeql-action/upload-sarif``.
+
+    SARIF mapping
+    -------------
+    * ``ruleId``  ← ``issue.code``
+    * ``level``   ← ``error`` / ``warning`` / ``note``
+    * ``text``    ← ``issue.message``
+    * ``uri``     ← ``issue.file`` (relative, URI-encoded)
+    * ``region``  ← line 1 column 1 (line info not available)
+
+    Determinism
+    -----------
+    Rules are sorted by ``id``; results are sorted by
+    ``(ruleId, uri, message)`` so the output is stable across runs.
+    """
+    from godot_project_doctor import __version__
+
+    # Collect unique rules (deduplicated by code)
+    rule_ids: list[str] = sorted({i.code for i in report.issues})
+    rules = [
+        {
+            "id": code,
+            "name": code,
+            "shortDescription": {"text": code.replace("_", " ").title()},
+            "helpUri": _TOOL_URI,
+        }
+        for code in rule_ids
+    ]
+
+    # Build results, sorted for determinism
+    results = []
+    for issue in sorted(report.issues, key=lambda i: (i.code, i.file or "", i.message)):
+        result: dict = {
+            "ruleId": issue.code,
+            "level": _SARIF_LEVEL.get(issue.severity, "warning"),
+            "message": {"text": issue.message},
+        }
+        if issue.file:
+            # Normalise separators and percent-encode spaces
+            uri = issue.file.replace("\\", "/").replace(" ", "%20")
+            result["locations"] = [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
+                        "region": {"startLine": 1, "startColumn": 1},
+                    }
+                }
+            ]
+        results.append(result)
+
+    sarif_doc = {
+        "$schema": _SARIF_SCHEMA,
+        "version": _SARIF_VERSION,
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": _TOOL_NAME,
+                        "version": __version__,
+                        "informationUri": _TOOL_URI,
+                        "rules": rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+
+    text = json.dumps(sarif_doc, indent=2, ensure_ascii=False)
+    if output:
+        output.write_text(text, encoding="utf-8")
+    return text

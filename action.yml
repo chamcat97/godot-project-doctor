@@ -1,0 +1,74 @@
+name: "Godot Project Doctor"
+description: >
+  Static-analyse a Godot 4 project, emit SARIF, and optionally upload
+  results to GitHub Code Scanning.  No Godot engine required; fully
+  offline (no LLM / network calls during analysis).
+
+author: "chamcat97"
+
+branding:
+  icon: "search"
+  color: "blue"
+
+inputs:
+  project-path:
+    description: "Path to the Godot project root (must contain project.godot)."
+    required: true
+    default: "."
+
+  fail-on:
+    description: >
+      Minimum severity that sets a non-zero exit code.
+      One of: error (default), warning, info, none.
+    required: false
+    default: "error"
+
+  sarif-output:
+    description: "Path where the SARIF file will be written."
+    required: false
+    default: "gdoctor.sarif"
+
+  upload-sarif:
+    description: >
+      Upload SARIF to GitHub Code Scanning using
+      github/codeql-action/upload-sarif.  Requires the
+      security-events: write permission.
+    required: false
+    default: "true"
+
+  extra-args:
+    description: "Additional arguments passed verbatim to `gdoctor scan`."
+    required: false
+    default: ""
+
+outputs:
+  sarif-file:
+    description: "Path to the generated SARIF file."
+    value: ${{ steps.scan.outputs.sarif-file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install godot-project-doctor
+      shell: bash
+      run: |
+        pip install godot-project-doctor --quiet
+
+    - name: Run scan and emit SARIF
+      id: scan
+      shell: bash
+      run: |
+        gdoctor scan "${{ inputs.project-path }}" \
+          --format sarif \
+          --output "${{ inputs.sarif-output }}" \
+          --fail-on "${{ inputs.fail-on }}" \
+          ${{ inputs.extra-args }} || EXIT=$?
+        echo "sarif-file=${{ inputs.sarif-output }}" >> "$GITHUB_OUTPUT"
+        exit ${EXIT:-0}
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: inputs.upload-sarif == 'true' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-output }}
+        category: godot-project-doctor

@@ -13,7 +13,13 @@ from godot_project_doctor.config import Config, apply_config, load_config
 from godot_project_doctor.context import render_context_markdown
 from godot_project_doctor.graph import build_graph, render_mermaid_graph, render_text_graph
 from godot_project_doctor.models import Severity
-from godot_project_doctor.reporter import build_report, render_json, render_markdown, render_text
+from godot_project_doctor.reporter import (
+    build_report,
+    render_json,
+    render_markdown,
+    render_sarif,
+    render_text,
+)
 from godot_project_doctor.scanner import GodotProjectError, scan
 
 # Severity rank used by --fail-on exit-code logic (higher = more severe).
@@ -72,7 +78,7 @@ def main() -> None:
     "--format",
     "-f",
     "fmt",
-    type=click.Choice(["text", "json", "markdown"], case_sensitive=False),
+    type=click.Choice(["text", "json", "markdown", "sarif"], case_sensitive=False),
     default="text",
     show_default=True,
     help="Output format.",
@@ -152,6 +158,10 @@ def scan_cmd(
             click.echo(text)
     elif fmt == "markdown":
         text = render_markdown(report, output)
+        if not output:
+            click.echo(text)
+    elif fmt == "sarif":
+        text = render_sarif(report, output)
         if not output:
             click.echo(text)
     else:
