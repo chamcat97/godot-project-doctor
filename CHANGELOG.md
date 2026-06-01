@@ -10,6 +10,21 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.3] — 2026-06-01
+
+### Fixed
+- **Unwritable `--output` paths no longer crash with a traceback.** `scan`,
+  `graph`, and `context` now catch `OSError` (permission denied, missing parent
+  directory, read-only target) when writing the output file and exit cleanly
+  with code 2 and a `cannot write to '<path>': <reason>` message. Previously a
+  `PermissionError` (e.g. running from `C:\Windows\System32`) surfaced as a raw
+  Python traceback.
+
+### Changed
+- `__version__` bumped to `"0.8.3"`.
+
+---
+
 ## [0.8.2] — 2026-06-01
 
 Signal-to-noise release — validated against a real 86-script project where the
@@ -257,7 +272,8 @@ default scan dropped from 77 warnings (≈99% false positives) to 2 genuine ones
 - `project.godot` metadata parsing.
 - Dependency graph builder and Mermaid/text renderers.
 
-[Unreleased]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.7.0...v0.8.0

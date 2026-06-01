@@ -1451,7 +1451,7 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.8.2")
+        self.assertEqual(godot_project_doctor.__version__, "0.8.3")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
@@ -3116,6 +3116,32 @@ class TestUnusedAutoloadCheck(unittest.TestCase):
         unused = [i for i in issues if i.code == "UNUSED_AUTOLOAD"]
         names = [i.message.split("'")[1] for i in unused]
         self.assertEqual(names, sorted(names))
+
+
+class TestOutputWriteErrors(unittest.TestCase):
+    """An unwritable --output path must produce a clean error, not a traceback."""
+
+    def test_output_write_guard_aborts_with_exit_2(self):
+        from godot_project_doctor.cli import _output_write_guard
+
+        with self.assertRaises(SystemExit) as cm, _output_write_guard(Path("nowhere/out.md")):
+            raise PermissionError(13, "Permission denied")
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_graph_unwritable_output_no_traceback(self):
+        """Writing the graph to a path under a missing directory exits cleanly."""
+        from click.testing import CliRunner
+
+        from godot_project_doctor.cli import main
+
+        with TempProject() as root:
+            make_minimal_project(root)
+            bad = root / "missing_dir" / "graph.md"
+            result = CliRunner().invoke(
+                main, ["graph", str(root), "--format", "mermaid", "--output", str(bad)]
+            )
+            self.assertNotIn("Traceback", result.output)
+            self.assertNotEqual(result.exit_code, 0)
 
 
 if __name__ == "__main__":

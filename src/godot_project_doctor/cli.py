@@ -65,6 +65,24 @@ def _compute_exit_code(issues: list, fail_on: str) -> int:
     return 0
 
 
+@contextlib.contextmanager
+def _output_write_guard(output: Path | None):
+    """Turn an unwritable ``--output`` path into a clean error instead of a traceback.
+
+    Covers permission denied, missing parent directory, read-only target, etc.
+    Exits with code 2 (usage/IO error), consistent with the other CLI errors.
+    """
+    try:
+        yield
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        click.echo(
+            click.style(f"Error: cannot write to '{output}': {reason}", fg="red", bold=True),
+            err=True,
+        )
+        sys.exit(2)
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="gdoctor")
 def main() -> None:
@@ -162,23 +180,24 @@ def scan_cmd(
 
     report = build_report(index)
 
-    if fmt == "json":
-        text = render_json(report, output)
-        if not output:
-            click.echo(text)
-    elif fmt == "markdown":
-        text = render_markdown(report, output)
-        if not output:
-            click.echo(text)
-    elif fmt == "sarif":
-        text = render_sarif(report, output)
-        if not output:
-            click.echo(text)
-    else:
-        if output:
-            render_text(report, output)
+    with _output_write_guard(output):
+        if fmt == "json":
+            text = render_json(report, output)
+            if not output:
+                click.echo(text)
+        elif fmt == "markdown":
+            text = render_markdown(report, output)
+            if not output:
+                click.echo(text)
+        elif fmt == "sarif":
+            text = render_sarif(report, output)
+            if not output:
+                click.echo(text)
         else:
-            render_text(report)
+            if output:
+                render_text(report, output)
+            else:
+                render_text(report)
 
     if output:
         click.echo(click.style(f"Report written to {output}", fg="green"), err=True)
@@ -221,7 +240,8 @@ def graph_cmd(project_path: Path, fmt: str, output: Path | None) -> None:
     text = render_mermaid_graph(graph) if fmt == "mermaid" else render_text_graph(graph)
 
     if output:
-        output.write_text(text, encoding="utf-8")
+        with _output_write_guard(output):
+            output.write_text(text, encoding="utf-8")
         click.echo(click.style(f"Graph written to {output}", fg="green"), err=True)
     else:
         click.echo(text, nl=False)
@@ -258,7 +278,8 @@ def context_cmd(project_path: Path, issue_text: str, output: Path | None) -> Non
     text = render_context_markdown(index, issue_text)
 
     if output:
-        output.write_text(text, encoding="utf-8")
+        with _output_write_guard(output):
+            output.write_text(text, encoding="utf-8")
         click.echo(click.style(f"Context report written to {output}", fg="green"), err=True)
     else:
         click.echo(text, nl=False)

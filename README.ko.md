@@ -232,7 +232,7 @@ gdoctor scan ./my-godot-game --format sarif --output gdoctor.sarif
 
 ```yaml
 # .github/workflows/godot-doctor.yml
-- uses: chamcat97/godot-project-doctor@v0.8.2
+- uses: chamcat97/godot-project-doctor@v0.8.3
   with:
     project-path: .
     fail-on: warning
