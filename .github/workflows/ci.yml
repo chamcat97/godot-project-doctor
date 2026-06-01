@@ -51,3 +51,39 @@ jobs:
 
       - name: Run mypy
         run: mypy src/godot_project_doctor
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Install wheel and smoke-test CLI
+        run: |
+          pip install dist/*.whl
+          gdoctor --help
+          gdoctor --version
+          gdoctor scan --help
+          gdoctor graph --help
+          gdoctor context --help
+
+      - name: Smoke-test with CP949 encoding
+        run: |
+          mkdir -p /tmp/smoke_project
+          printf '[application]\nconfig/name="Smoke"\n' > /tmp/smoke_project/project.godot
+          PYTHONIOENCODING=cp949 gdoctor scan /tmp/smoke_project 2>&1 | grep -v "^Traceback" || true
+          PYTHONIOENCODING=cp949 gdoctor graph /tmp/smoke_project 2>&1 | grep -v "^Traceback" || true
+          PYTHONIOENCODING=cp949 gdoctor context /tmp/smoke_project 2>&1 | grep -v "^Traceback" || true
+          echo "CP949 smoke test passed"

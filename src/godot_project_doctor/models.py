@@ -6,6 +6,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+# Increment when the JSON output shape changes in a backward-incompatible way.
+# 1.0 — initial release
+# 1.1 — added ResourceRef.kind field
+SCHEMA_VERSION = "1.1"
+
 
 class Severity(StrEnum):
     ERROR = "ERROR"

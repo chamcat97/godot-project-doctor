@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict
 
 from godot_project_doctor.models import ProjectIndex
 
-# source_file (relative path) -> list of referenced res:// paths
+# source_file (relative path) -> list of referenced res:// paths (deduped)
 Graph = dict[str, list[str]]
 
 # Binary extensions that must never appear in refs (belt-and-suspenders guard)
@@ -20,37 +21,58 @@ def build_graph(index: ProjectIndex) -> Graph:
     Edges: source_file -> referenced_resource_path
 
     Binary .res / .scn files are excluded even if somehow present in the index.
-    Only text-format resources (.tscn / .tres) produce source nodes, which is
-    already guaranteed by the indexer — this guard is a safety net.
+    Duplicate edges (same source → same target) are removed while preserving
+    insertion order.
     """
-    graph: Graph = defaultdict(list)
+    graph: dict[str, dict[str, None]] = defaultdict(dict)  # ordered set via dict keys
 
     for ref in index.refs:
-        # Skip any ref whose path points at a binary resource
         suffix = "." + ref.path.rstrip("/").rsplit(".", 1)[-1].lower() if "." in ref.path else ""
         if suffix in _BINARY_EXTS:
             continue
-        graph[ref.source_file].append(ref.path)
+        graph[ref.source_file][ref.path] = None  # dedup via dict key
 
-    return dict(graph)
+    return {src: list(deps.keys()) for src, deps in graph.items()}
 
 
 # ---------------------------------------------------------------------------
-# Stable Mermaid node-ID helper
+# Mermaid node-ID helper
 # ---------------------------------------------------------------------------
 
 
 def _node_id(path: str) -> str:
-    """Return a stable, Mermaid-safe identifier derived from *path*.
+    """Return a stable, unique, Mermaid-safe node identifier for *path*.
 
-    Replaces every character that is not ASCII alphanumeric with ``_``,
-    then ensures the result starts with a letter so it is always valid.
+    Format: ``{slug}_{hash6}`` where
+
+    * *slug* is the filename's non-alphanumeric chars replaced by ``_``
+    * *hash6* is the first 6 hex digits of the MD5 of the full path,
+      which prevents collisions when different paths share the same filename
+      (e.g. ``res://foo-bar.tres`` vs ``res://foo/bar.tres``).
+
+    The identifier always starts with a letter (Mermaid requirement).
     """
-    sanitised = re.sub(r"[^A-Za-z0-9]", "_", path)
-    # Mermaid node IDs must start with a letter
-    if sanitised and sanitised[0].isdigit():
-        sanitised = "n" + sanitised
-    return sanitised or "node"
+    norm = path.replace("\\", "/")
+    # Slug from the last path segment (filename)
+    name = norm.rsplit("/", 1)[-1]
+    slug = re.sub(r"[^A-Za-z0-9]", "_", name)
+    # Short hash over the *full* path to guarantee uniqueness
+    h6 = hashlib.md5(norm.encode()).hexdigest()[:6]
+    nid = f"{slug}_{h6}" if slug else f"node_{h6}"
+    # Must start with a letter
+    if nid[0].isdigit():
+        nid = "n" + nid
+    return nid
+
+
+def _mermaid_label(path: str) -> str:
+    """Return a Mermaid-safe label for *path*.
+
+    Shows only the last path segment.  Replaces ``"`` with ``'`` so the label
+    can be safely embedded inside Mermaid's ``["…"]`` syntax.
+    """
+    name = path.replace("\\", "/").rsplit("/", 1)[-1]
+    return name.replace('"', "'")
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +97,6 @@ def render_text_graph(graph: Graph) -> str:
             lines.append(f"  -> {dep}")
         lines.append("")
 
-    # Strip trailing blank line then add a single newline
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
@@ -87,8 +108,10 @@ def render_text_graph(graph: Graph) -> str:
 def render_mermaid_graph(graph: Graph) -> str:
     """Render *graph* as a Mermaid ``flowchart TD`` diagram.
 
-    Node labels show the last path segment (filename) for readability;
-    node identifiers are the full sanitised path so they are unique and stable.
+    * Node IDs are ``{slug}_{md5[:6]}`` — unique even when different paths
+      share the same filename.
+    * Node labels show only the filename; ``"`` is replaced with ``'``.
+    * Duplicate edges are suppressed.
     """
     lines: list[str] = ["flowchart TD"]
 
@@ -102,20 +125,25 @@ def render_mermaid_graph(graph: Graph) -> str:
         all_paths.add(source)
         all_paths.update(deps)
 
-    # Emit node definitions  id["label"]
+    # Emit node definitions
     node_ids: dict[str, str] = {}
     for path in sorted(all_paths):
         nid = _node_id(path)
         node_ids[path] = nid
-        label = path.replace("\\", "/").rsplit("/", 1)[-1]
+        label = _mermaid_label(path)
         lines.append(f'    {nid}["{label}"]')
 
     lines.append("")
 
-    # Emit edges
+    # Emit edges, deduplicating across (src_id, dep_id) pairs
+    seen_edges: set[tuple[str, str]] = set()
     for source in sorted(graph):
         src_id = node_ids[source]
         for dep in sorted(graph[source]):
-            lines.append(f"    {src_id} --> {node_ids[dep]}")
+            dep_id = node_ids[dep]
+            edge = (src_id, dep_id)
+            if edge not in seen_edges:
+                seen_edges.add(edge)
+                lines.append(f"    {src_id} --> {dep_id}")
 
     return "\n".join(lines) + "\n"

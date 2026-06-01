@@ -2,21 +2,41 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 
 import click
 
+from godot_project_doctor import __version__
 from godot_project_doctor.context import render_context_markdown
 from godot_project_doctor.graph import build_graph, render_mermaid_graph, render_text_graph
 from godot_project_doctor.reporter import build_report, render_json, render_markdown, render_text
 from godot_project_doctor.scanner import GodotProjectError, scan
 
 
+def _ensure_utf8_errors_replace() -> None:
+    """Reconfigure stdout/stderr to use errors='replace' on narrow-encoding terminals.
+
+    On Windows terminals using CP949, GBK, or other encodings that cannot
+    represent all Unicode code points, writing non-encodable characters would
+    raise ``UnicodeEncodeError``.  Switching to ``errors='replace'`` substitutes
+    those characters with ``?`` instead of crashing.
+
+    File output (via ``--output``) is unaffected: those paths always write
+    bytes explicitly as UTF-8.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            with contextlib.suppress(Exception):
+                stream.reconfigure(errors="replace")
+
+
 @click.group()
-@click.version_option(version="0.1.0", prog_name="gdoctor")
+@click.version_option(version=__version__, prog_name="gdoctor")
 def main() -> None:
     """Godot Project Doctor - a static auditor for Godot 4 projects."""
+    _ensure_utf8_errors_replace()
 
 
 @main.command("scan")

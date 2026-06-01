@@ -21,6 +21,7 @@ def run_all_checks(index: ProjectIndex) -> list[Issue]:
     project_root = Path(index.project_root)
 
     issues.extend(_check_missing_export_presets(index))
+    issues.extend(_check_project_godot_integrity(index, project_root))
     issues.extend(_check_missing_external_resources(index, project_root))
     issues.extend(_check_large_textures(index, project_root))
     issues.extend(_check_large_audio(index, project_root))
@@ -30,6 +31,80 @@ def run_all_checks(index: ProjectIndex) -> list[Issue]:
 
 
 # ─── Individual checks ────────────────────────────────────────────────────────
+
+
+def _check_project_godot_integrity(index: ProjectIndex, project_root: Path) -> list[Issue]:
+    """Check that configured main scene and autoload paths actually exist.
+
+    Rules
+    -----
+    * **Main scene not configured** → INFO (``NO_MAIN_SCENE``).
+      A missing ``run/main_scene`` is valid for library-style projects.
+    * **Main scene path does not exist** → ERROR (``MISSING_MAIN_SCENE``).
+    * **Autoload path does not exist** → ERROR (``MISSING_AUTOLOAD``).
+
+    ``uid://`` paths cannot be resolved without the Godot import cache and are
+    skipped silently to avoid false positives.
+    """
+    issues: list[Issue] = []
+    summary = index.summary
+
+    # ── main scene ────────────────────────────────────────────────────────────
+    if not summary.main_scene:
+        issues.append(
+            Issue(
+                code="NO_MAIN_SCENE",
+                severity=Severity.INFO,
+                message="No main scene configured in project.godot.",
+                file="project.godot",
+                details=(
+                    "Set run/main_scene in project.godot if this is a runnable game. "
+                    "Library-only projects may intentionally omit a main scene."
+                ),
+            )
+        )
+    else:
+        main_path = summary.main_scene
+        if main_path.startswith("uid://"):
+            pass  # uid:// resolution requires the Godot import cache — skip
+        else:
+            real = (
+                project_root / main_path[len("res://") :]
+                if main_path.startswith("res://")
+                else project_root / main_path
+            )
+            if not real.exists():
+                issues.append(
+                    Issue(
+                        code="MISSING_MAIN_SCENE",
+                        severity=Severity.ERROR,
+                        message=f"Main scene does not exist: {main_path}",
+                        file="project.godot",
+                        details=f"Expected at: {real}",
+                    )
+                )
+
+    # ── autoloads ─────────────────────────────────────────────────────────────
+    for name, path in sorted(summary.autoloads.items()):
+        if path.startswith("uid://"):
+            continue  # uid:// — cannot resolve statically
+        real = (
+            project_root / path[len("res://") :]
+            if path.startswith("res://")
+            else project_root / path
+        )
+        if not real.exists():
+            issues.append(
+                Issue(
+                    code="MISSING_AUTOLOAD",
+                    severity=Severity.ERROR,
+                    message=f"Autoload '{name}' path does not exist: {path}",
+                    file="project.godot",
+                    details=f"Expected at: {real}",
+                )
+            )
+
+    return issues
 
 
 def _check_missing_export_presets(index: ProjectIndex) -> list[Issue]:

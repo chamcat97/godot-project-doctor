@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -355,7 +357,7 @@ class TestJsonOutput(unittest.TestCase):
             index = scan(root)
             report = build_report(index)
             data = json.loads(render_json(report))
-            self.assertEqual(data.get("schema_version"), "1.0")
+            self.assertEqual(data.get("schema_version"), "1.1")
 
     def test_json_issues_are_serialisable(self):
         with TempProject() as root:
@@ -1227,6 +1229,326 @@ class TestCliUnicodeSafety(unittest.TestCase):
             out.unlink(missing_ok=True)
         finally:
             sys.stdout = original
+
+
+# ─── GDScript false-positive guard ───────────────────────────────────────────
+
+
+class TestGDScriptFalsePositives(unittest.TestCase):
+    """Regression tests for calls that must NOT be extracted as refs."""
+
+    def _gd(self, root: Path, name: str, content: str) -> Path:
+        p = root / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_inline_comment_load_ignored(self):
+        with TempProject() as root:
+            gd = self._gd(root, "a.gd", 'var x = 1  # load("res://foo.gd")\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(refs, [])
+
+    def test_download_call_ignored(self):
+        with TempProject() as root:
+            gd = self._gd(root, "b.gd", 'download("res://foo.gd")\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(refs, [])
+
+    def test_my_load_call_ignored(self):
+        with TempProject() as root:
+            gd = self._gd(root, "c.gd", 'my_load("res://foo.gd")\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(refs, [])
+
+    def test_preload_cache_call_ignored(self):
+        with TempProject() as root:
+            gd = self._gd(root, "d.gd", 'preload_cache("res://foo.gd")\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(refs, [])
+
+    def test_load_in_single_quoted_string_ignored(self):
+        """load() call text inside a single-quoted string must not be extracted."""
+        with TempProject() as root:
+            # The GDScript line: var s = 'load("res://foo.gd") example'
+            gd = self._gd(root, "e.gd", "var s = 'load(\"res://foo.gd\") example'\n")
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(refs, [])
+
+    def test_single_quote_path_extracted(self):
+        """GDScript supports single-quoted string literals for resource paths."""
+        with TempProject() as root:
+            gd = self._gd(root, "f.gd", "var x = preload('res://assets/hero.png')\n")
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(refs[0].path, "res://assets/hero.png")
+
+    def test_inline_comment_after_valid_load_still_extracts(self):
+        """A valid load before the # comment must still be extracted."""
+        with TempProject() as root:
+            gd = self._gd(root, "g.gd", 'var x = load("res://foo.gd")  # load stuff\n')
+            refs = extract_gdscript_refs(gd, root)
+            self.assertEqual(len(refs), 1)
+            self.assertEqual(refs[0].path, "res://foo.gd")
+
+
+# ─── Mermaid node-ID stability and edge dedup ─────────────────────────────────
+
+
+class TestMermaidGraphStability(unittest.TestCase):
+    def test_different_paths_same_filename_get_distinct_ids(self):
+        """res://foo-bar.tres and res://foo/bar.tres must produce different node IDs."""
+        from godot_project_doctor.graph import _node_id
+
+        id1 = _node_id("res://foo-bar.tres")
+        id2 = _node_id("res://foo/bar.tres")
+        self.assertNotEqual(id1, id2, "Collision between paths with same filename segment")
+
+    def test_node_id_is_deterministic(self):
+        from godot_project_doctor.graph import _node_id
+
+        self.assertEqual(_node_id("res://scenes/Main.tscn"), _node_id("res://scenes/Main.tscn"))
+
+    def test_mermaid_no_duplicate_edges(self):
+        """If the same (src, dst) appears twice, the mermaid output renders it once."""
+        from godot_project_doctor.models import ResourceRef
+
+        index = _make_index_with_issues([])
+        # Inject two refs to the same target from the same source
+        index.refs = [
+            ResourceRef(
+                source_file="scenes/Main.tscn",
+                ref_type="Script",
+                path="res://scripts/player.gd",
+                ref_id="1",
+            ),
+            ResourceRef(
+                source_file="scenes/Main.tscn",
+                ref_type="preload",
+                path="res://scripts/player.gd",
+                ref_id="",
+                kind="gdscript",
+            ),
+        ]
+        graph = build_graph(index)
+        mermaid = render_mermaid_graph(graph)
+        self.assertEqual(mermaid.count("-->"), 1, "Duplicate edge found in mermaid output")
+
+    def test_mermaid_label_quote_escaped(self):
+        """Double-quotes in labels must be replaced so the mermaid is syntactically valid."""
+        from godot_project_doctor.graph import _mermaid_label
+
+        label = _mermaid_label('res://some "thing".tres')
+        self.assertNotIn('"', label)
+
+    def test_mermaid_collision_paths_both_present(self):
+        """Both collision-prone paths appear as separate nodes in the diagram."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="CollTest"\n')
+            _write(root / "foo-bar.tres", "[resource]\n")
+            _write(root / "foo" / "bar.tres", "[resource]\n")
+            _write(
+                root / "scenes" / "Main.tscn",
+                "[gd_scene format=3]\n"
+                '[ext_resource type="Resource" path="res://foo-bar.tres" id="1"]\n'
+                '[ext_resource type="Resource" path="res://foo/bar.tres" id="2"]\n',
+            )
+            index = scan(root)
+            graph = build_graph(index)
+            mermaid = render_mermaid_graph(graph)
+            from godot_project_doctor.graph import _node_id
+
+            id1 = _node_id("res://foo-bar.tres")
+            id2 = _node_id("res://foo/bar.tres")
+            self.assertNotEqual(id1, id2)
+            self.assertIn(id1, mermaid)
+            self.assertIn(id2, mermaid)
+
+
+# ─── Version and schema consistency ──────────────────────────────────────────
+
+
+class TestVersionConsistency(unittest.TestCase):
+    def test_package_version_is_0_2_0(self):
+        import godot_project_doctor
+
+        self.assertEqual(godot_project_doctor.__version__, "0.2.0")
+
+    def test_schema_version_constant_is_1_1(self):
+        from godot_project_doctor.models import SCHEMA_VERSION
+
+        self.assertEqual(SCHEMA_VERSION, "1.1")
+
+    def test_json_report_uses_schema_version_constant(self):
+        with TempProject() as root:
+            make_minimal_project(root)
+            index = scan(root)
+            from godot_project_doctor.models import SCHEMA_VERSION
+
+            data = json.loads(render_json(build_report(index)))
+            self.assertEqual(data["schema_version"], SCHEMA_VERSION)
+
+
+# ─── project.godot integrity checks ──────────────────────────────────────────
+
+
+class TestProjectGodotIntegrity(unittest.TestCase):
+    def test_missing_main_scene_file_is_error(self):
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '[application]\nconfig/name="X"\nrun/main_scene="res://scenes/Gone.tscn"\n',
+            )
+            index = scan(root)
+            errs = [i for i in index.issues if i.code == "MISSING_MAIN_SCENE"]
+            self.assertEqual(len(errs), 1)
+            self.assertEqual(errs[0].severity, Severity.ERROR)
+            self.assertIn("Gone.tscn", errs[0].message)
+
+    def test_existing_main_scene_no_error(self):
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '[application]\nrun/main_scene="res://scenes/Main.tscn"\n',
+            )
+            _write(root / "scenes" / "Main.tscn", "[gd_scene format=3]\n")
+            index = scan(root)
+            errs = [i for i in index.issues if i.code == "MISSING_MAIN_SCENE"]
+            self.assertEqual(errs, [])
+
+    def test_no_main_scene_configured_is_info(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="Lib"\n')
+            index = scan(root)
+            info = [i for i in index.issues if i.code == "NO_MAIN_SCENE"]
+            self.assertEqual(len(info), 1)
+            self.assertEqual(info[0].severity, Severity.INFO)
+
+    def test_missing_autoload_is_error(self):
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '[application]\nconfig/name="X"\n[autoload]\nGameState="res://autoload/Gone.gd"\n',
+            )
+            index = scan(root)
+            errs = [i for i in index.issues if i.code == "MISSING_AUTOLOAD"]
+            self.assertEqual(len(errs), 1)
+            self.assertEqual(errs[0].severity, Severity.ERROR)
+            self.assertIn("GameState", errs[0].message)
+
+    def test_existing_autoload_no_error(self):
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '[application]\n[autoload]\nGameState="res://autoload/gs.gd"\n',
+            )
+            _write(root / "autoload" / "gs.gd", "extends Node\n")
+            index = scan(root)
+            errs = [i for i in index.issues if i.code == "MISSING_AUTOLOAD"]
+            self.assertEqual(errs, [])
+
+    def test_uid_autoload_not_checked(self):
+        """uid:// autoload paths must not produce a false MISSING_AUTOLOAD error."""
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '[application]\n[autoload]\nGameState="uid://abc123xyz"\n',
+            )
+            index = scan(root)
+            errs = [i for i in index.issues if i.code == "MISSING_AUTOLOAD"]
+            self.assertEqual(errs, [], "uid:// autoload path should not be checked")
+
+    def test_uid_main_scene_not_checked(self):
+        """uid:// main scene must not produce a false MISSING_MAIN_SCENE error."""
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '[application]\nrun/main_scene="uid://abc123"\n',
+            )
+            index = scan(root)
+            errs = [i for i in index.issues if i.code == "MISSING_MAIN_SCENE"]
+            self.assertEqual(errs, [], "uid:// main scene should not be checked")
+
+    def test_minimal_project_main_scene_missing_produces_error(self):
+        """make_minimal_project sets a main scene path that doesn't exist -> ERROR."""
+        with TempProject() as root:
+            make_minimal_project(root)
+            index = scan(root)
+            codes = [i.code for i in index.issues]
+            self.assertIn("MISSING_MAIN_SCENE", codes)
+
+
+# ─── CP949 subprocess smoke tests ────────────────────────────────────────────
+
+
+def _run_cp949(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Spawn gdoctor with PYTHONIOENCODING=cp949 and return the result."""
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "cp949"
+    env["PYTHONPATH"] = str(Path(__file__).parent.parent / "src")
+    return subprocess.run(
+        [sys.executable, "-m", "godot_project_doctor"] + args,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+class TestCp949Subprocess(unittest.TestCase):
+    """Real subprocess tests with PYTHONIOENCODING=cp949.
+
+    Verifies that all CLI commands complete without a Traceback on narrow
+    encoding terminals.  These tests spawn a real child process.
+    """
+
+    def _assert_no_traceback(self, result: subprocess.CompletedProcess[str]) -> None:
+        combined = result.stdout + result.stderr
+        self.assertNotIn(
+            "Traceback",
+            combined,
+            f"Traceback detected (exit={result.returncode}):\n{combined[:800]}",
+        )
+
+    def test_cp949_help(self):
+        result = _run_cp949(["--help"])
+        self._assert_no_traceback(result)
+
+    def test_cp949_version(self):
+        result = _run_cp949(["--version"])
+        self._assert_no_traceback(result)
+
+    def test_cp949_scan_text(self):
+        with TempProject() as root:
+            make_minimal_project(root)
+            result = _run_cp949(["scan", str(root)])
+            self._assert_no_traceback(result)
+            self.assertIn(result.returncode, (0, 1))
+
+    def test_cp949_scan_json(self):
+        with TempProject() as root:
+            make_minimal_project(root)
+            result = _run_cp949(["scan", str(root), "--format", "json"])
+            self._assert_no_traceback(result)
+
+    def test_cp949_scan_markdown(self):
+        with TempProject() as root:
+            make_minimal_project(root)
+            result = _run_cp949(["scan", str(root), "--format", "markdown"])
+            self._assert_no_traceback(result)
+
+    def test_cp949_graph(self):
+        with TempProject() as root:
+            make_minimal_project(root)
+            result = _run_cp949(["graph", str(root)])
+            self._assert_no_traceback(result)
+
+    def test_cp949_context(self):
+        with TempProject() as root:
+            make_minimal_project(root)
+            result = _run_cp949(["context", str(root), "--issue", "test issue"])
+            self._assert_no_traceback(result)
 
 
 if __name__ == "__main__":

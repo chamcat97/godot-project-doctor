@@ -1,4 +1,4 @@
-# godot-project-doctor
+# godot-project-doctor [![version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/chamcat97/godot-project-doctor)
 
 A deterministic CLI auditor for [Godot 4](https://godotengine.org/) projects.
 
@@ -104,7 +104,7 @@ Stable, machine-readable JSON for CI pipelines and AI code agents:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "project_root": "/path/to/game",
   "summary": { "project_name": "My Game", "main_scene": "res://scenes/Main.tscn" },
   "file_stats": { "scenes": 3, "scripts": 12 },
@@ -137,11 +137,18 @@ Simple Markdown report suitable for GitHub issues or documentation.
 
 | Code | Severity | Description |
 |---|---|---|
+| `MISSING_MAIN_SCENE` | ERROR | `run/main_scene` in `project.godot` points to a file that does not exist |
+| `MISSING_AUTOLOAD` | ERROR | An autoload path in `project.godot` does not exist |
 | `MISSING_EXT_RESOURCE` | ERROR | A `.tscn`/`.tres`/`.gd` file references a path that does not exist |
 | `LARGE_TEXTURE` | WARNING | Raster image exceeds 2048×2048 px (requires Pillow) |
 | `LARGE_AUDIO` | WARNING | Audio file is larger than 10 MB |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene, resource, or script |
+| `NO_MAIN_SCENE` | INFO | `run/main_scene` is not configured (may be intentional for library projects) |
 | `NO_EXPORT_PRESETS` | INFO | `export_presets.cfg` is absent |
+
+> **Note on `uid://` paths:** Godot 4 uses `uid://` UIDs for some references.
+> These cannot be resolved without the Godot import cache and are skipped
+> rather than generating false-positive errors.
 
 > **Note on `UNUSED_ASSET_CANDIDATE`:** Dynamic `load()` calls with variable
 > paths cannot be detected by static analysis.  Assets loaded that way will

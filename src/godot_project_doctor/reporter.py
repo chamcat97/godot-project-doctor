@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 
-from godot_project_doctor.models import ProjectIndex, ScanReport, Severity
+from godot_project_doctor.models import SCHEMA_VERSION, ProjectIndex, ScanReport, Severity
 
 _SEVERITY_COLORS: dict[Severity, str] = {
     Severity.ERROR: "red",
@@ -44,7 +44,7 @@ def _terminal_icons() -> dict[Severity, str]:
 def build_report(index: ProjectIndex) -> ScanReport:
     """Convert a ProjectIndex into a ScanReport."""
     return ScanReport(
-        schema_version="1.0",
+        schema_version=SCHEMA_VERSION,
         project_root=index.project_root,
         summary=index.summary,
         file_stats=index.file_stats,
