@@ -98,7 +98,12 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
 
     Parses ext_resource entries from all ``.tscn`` and ``.tres`` files,
     extracts static ``res://`` references from all ``.gd`` files, and builds
-    a ``uid:// → res://`` mapping from ``.uid`` sidecar files.
+    a ``uid:// → res://`` mapping from ``.uid`` sidecar files, ``.import``
+    files, and ``.godot/uid_cache.bin`` (best-effort).
+
+    For each :class:`~godot_project_doctor.models.ResourceRef` whose ``path``
+    field is a ``uid://`` reference that appears in the uid map, the
+    ``resolved_path`` and ``resolved_via`` fields are populated.
     """
     # Import here to avoid circular dependencies at module load time
     from godot_project_doctor.gdscript import extract_gdscript_refs
@@ -150,7 +155,15 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
         other=len(other_files),
     )
 
-    uid_map, uid_issues = build_uid_map(project_root)
+    uid_map, uid_sources, uid_issues = build_uid_map(project_root)
+
+    # Populate resolved_path / resolved_via on uid:// refs
+    for ref in all_refs:
+        if ref.path.startswith("uid://"):
+            res = uid_map.get(ref.path)
+            if res:
+                ref.resolved_path = res
+                ref.resolved_via = uid_sources.get(ref.path)
 
     index = ProjectIndex(
         project_root=str(project_root),
@@ -166,6 +179,7 @@ def index_project(project_root: Path, summary: ProjectSummary) -> ProjectIndex:
         has_export_presets=has_export_presets,
         refs=all_refs,
         uid_map=uid_map,
+        uid_sources=uid_sources,
     )
     index.issues.extend(uid_issues)
     return index

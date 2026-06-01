@@ -104,7 +104,7 @@ Stable, machine-readable JSON for CI pipelines and AI code agents:
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "project_root": "/path/to/game",
   "summary": { "project_name": "My Game", "main_scene": "res://scenes/Main.tscn" },
   "file_stats": { "scenes": 3, "scripts": 12 },
@@ -116,16 +116,26 @@ Stable, machine-readable JSON for CI pipelines and AI code agents:
       "type": "Script",
       "uid": "uid://abc123",
       "path": "res://player/player.gd",
-      "id": "1"
+      "id": "1",
+      "resolved_path": null,
+      "resolved_via": null
     }
   ],
   "issues": [ { "code": "MISSING_EXT_RESOURCE", "severity": "ERROR" } ]
 }
 ```
 
-The `kind` field (added in schema 1.1) is `"ext_resource"` for references
-declared in `[ext_resource ...]` headers and `"gdscript"` for references
-extracted from static GDScript string literals.
+**Schema history**
+
+| Version | Added fields |
+|---|---|
+| `1.0` | initial |
+| `1.1` | `refs[].kind` |
+| `1.2` | `refs[].resolved_path`, `refs[].resolved_via` |
+
+`resolved_path` is set when `path` is a `uid://` reference that was resolved
+via a `.uid` sidecar, `.import` file, or `uid_cache.bin`.
+`resolved_via` is `"uid_sidecar"`, `"import"`, or `"uid_cache"` accordingly.
 
 ### `markdown`
 
@@ -143,16 +153,16 @@ Simple Markdown report suitable for GitHub issues or documentation.
 | `MISSING_EXT_RESOURCE` | ERROR | A `.tscn`/`.tres`/`.gd` file references a path that does not exist |
 | `LARGE_TEXTURE` | WARNING | Raster image exceeds 2048×2048 px (requires Pillow) |
 | `LARGE_AUDIO` | WARNING | Audio file is larger than 10 MB |
-| `DUPLICATE_UID` | WARNING | Two `.uid` sidecar files claim the same `uid://` string |
+| `DUPLICATE_UID` | WARNING | Two or more sources claim the same `uid://` for different files |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene, resource, or script |
 | `NO_MAIN_SCENE` | INFO | `run/main_scene` is not configured (may be intentional for library projects) |
 | `NO_EXPORT_PRESETS` | INFO | `export_presets.cfg` is absent |
 
-> **`uid://` paths**: When `*.uid` sidecar files are present alongside resources,
-> `gdoctor` resolves `uid://` references to the corresponding `res://` path and
-> includes them in missing-reference and unused-asset checks.  UIDs without a
-> matching sidecar are silently skipped to avoid false-positive errors.
-> `*.import` files and the binary `.godot/uid_cache.bin` are not yet parsed.
+> **`uid://` paths**: `gdoctor` resolves `uid://` references from three sources —
+> `*.uid` sidecar files (highest priority), `*.import` files, and
+> `.godot/uid_cache.bin` (best-effort binary parse, fails silently).
+> Resolved UIDs are checked for existence and excluded from unused-asset
+> candidates.  Unresolvable UIDs are silently skipped to prevent false positives.
 
 > **Note on `UNUSED_ASSET_CANDIDATE`:** Dynamic `load()` calls with variable
 > paths cannot be detected by static analysis.  Assets loaded that way will

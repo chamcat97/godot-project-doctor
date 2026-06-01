@@ -8,7 +8,33 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-*(Phase 1 uid:// full resolution in progress — see next release)*
+*(Phase 2 config file + exit-code policy in progress)*
+
+---
+
+## [0.3.0] — 2025-06-02  *(schema 1.2)*
+
+### Added
+- **`uid://` full resolution** (Phase 1): `uid_map.py` now reads three sources:
+  1. `*.uid` sidecar files (highest priority)
+  2. `*.import` files (`[remap]` section `uid=` + `source_file=`)
+  3. `.godot/uid_cache.bin` (best-effort binary parse, silently ignored on failure)
+  Sources are merged; same UID from different sources for the *same path* is
+  accepted silently; different paths → `DUPLICATE_UID` WARNING.
+- `ResourceRef.resolved_path` — `res://` path when a `uid://` ref was resolved;
+  `None` for already-resolved `res://` paths.  Added to JSON output.
+- `ResourceRef.resolved_via` — source of the resolution
+  (`"uid_sidecar"` | `"import"` | `"uid_cache"`); `None` otherwise.
+  Added to JSON output.
+- `ProjectIndex.uid_sources` — maps each resolved UID to its source (internal,
+  not serialised).
+
+### Changed
+- `build_uid_map()` now returns `(uid_map, uid_sources, issues)` instead of
+  `(uid_map, issues)`.
+- `SCHEMA_VERSION` bumped to `"1.2"` (`resolved_path` + `resolved_via` are
+  additive; existing consumers can ignore them).
+- `__version__` bumped to `"0.3.0"`.
 
 ---
 

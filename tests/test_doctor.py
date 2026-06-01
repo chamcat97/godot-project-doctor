@@ -357,7 +357,7 @@ class TestJsonOutput(unittest.TestCase):
             index = scan(root)
             report = build_report(index)
             data = json.loads(render_json(report))
-            self.assertEqual(data.get("schema_version"), "1.1")
+            self.assertEqual(data.get("schema_version"), "1.2")
 
     def test_json_issues_are_serialisable(self):
         with TempProject() as root:
@@ -1372,12 +1372,12 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version_is_0_2_0(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.2.1")
+        self.assertEqual(godot_project_doctor.__version__, "0.3.0")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
 
-        self.assertEqual(SCHEMA_VERSION, "1.1")
+        self.assertEqual(SCHEMA_VERSION, "1.2")
 
     def test_json_report_uses_schema_version_constant(self):
         with TempProject() as root:
@@ -1820,7 +1820,7 @@ class TestUidMapBuilding(unittest.TestCase):
 
     def test_no_uid_files_returns_empty_map(self):
         with TempProject() as root:
-            uid_map, issues = self._build(root)
+            uid_map, _sources, issues = self._build(root)
             self.assertEqual(uid_map, {})
             self.assertEqual(issues, [])
 
@@ -1828,7 +1828,7 @@ class TestUidMapBuilding(unittest.TestCase):
         with TempProject() as root:
             _write(root / "scripts" / "player.gd", "extends Node\n")
             _write(root / "scripts" / "player.gd.uid", "uid://cb6n3abc\n")
-            uid_map, issues = self._build(root)
+            uid_map, _sources, issues = self._build(root)
             self.assertEqual(uid_map.get("uid://cb6n3abc"), "res://scripts/player.gd")
             self.assertEqual(issues, [])
 
@@ -1838,7 +1838,7 @@ class TestUidMapBuilding(unittest.TestCase):
             _write(root / "a.gd.uid", "uid://aaa\n")
             _write(root / "b.gd", "")
             _write(root / "b.gd.uid", "uid://bbb\n")
-            uid_map, _ = self._build(root)
+            uid_map, _sources, _ = self._build(root)
             self.assertIn("uid://aaa", uid_map)
             self.assertIn("uid://bbb", uid_map)
 
@@ -1848,7 +1848,7 @@ class TestUidMapBuilding(unittest.TestCase):
             _write(root / "a.gd.uid", "uid://same\n")
             _write(root / "b.gd", "")
             _write(root / "b.gd.uid", "uid://same\n")
-            uid_map, issues = self._build(root)
+            uid_map, _sources, issues = self._build(root)
             self.assertIn("uid://same", uid_map)
             dup_issues = [i for i in issues if i.code == "DUPLICATE_UID"]
             self.assertEqual(len(dup_issues), 1)
@@ -1857,14 +1857,14 @@ class TestUidMapBuilding(unittest.TestCase):
     def test_malformed_uid_file_skipped(self):
         with TempProject() as root:
             _write(root / "a.gd.uid", "not-a-uid\n")
-            uid_map, issues = self._build(root)
+            uid_map, _sources, issues = self._build(root)
             self.assertEqual(uid_map, {})
 
     def test_skip_dirs_respected(self):
         """.uid files inside .git must not be read."""
         with TempProject() as root:
             _write(root / ".git" / "some.gd.uid", "uid://git111\n")
-            uid_map, _ = self._build(root)
+            uid_map, _sources, _ = self._build(root)
             self.assertNotIn("uid://git111", uid_map)
 
 
@@ -1954,6 +1954,182 @@ class TestUidResolutionIntegration(unittest.TestCase):
             # No crash expected
             missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
             self.assertEqual(missing, [])
+
+
+# ─── Phase 1: .import parsing + resolved_path/via ────────────────────────────
+
+
+class TestImportFileParsing(unittest.TestCase):
+    """Unit tests for uid_map._parse_import_file() and .import integration."""
+
+    def setUp(self) -> None:
+        from godot_project_doctor.uid_map import _parse_import_file, build_uid_map
+
+        self._parse = _parse_import_file
+        self._build = build_uid_map
+
+    def test_import_file_uid_and_source_parsed(self):
+        with TempProject() as root:
+            _write(
+                root / "assets" / "hero.png.import",
+                '[remap]\nuid="uid://img001"\nsource_file="res://assets/hero.png"\n',
+            )
+            imp = root / "assets" / "hero.png.import"
+            uid_str, src = self._parse(imp)
+            self.assertEqual(uid_str, "uid://img001")
+            self.assertEqual(src, "res://assets/hero.png")
+
+    def test_import_file_no_uid_returns_none(self):
+        with TempProject() as root:
+            _write(root / "x.import", '[remap]\nsource_file="res://x.png"\n')
+            uid_str, src = self._parse(root / "x.import")
+            self.assertIsNone(uid_str)
+
+    def test_import_file_not_in_remap_section_ignored(self):
+        """uid= outside [remap] must not be returned."""
+        with TempProject() as root:
+            _write(
+                root / "x.import",
+                '[deps]\nuid="uid://wrong"\nsource_file="res://x.png"\n',
+            )
+            uid_str, _ = self._parse(root / "x.import")
+            self.assertIsNone(uid_str)
+
+    def test_build_uid_map_includes_import_files(self):
+        with TempProject() as root:
+            _write(root / "assets" / "hero.png", "PNG")
+            _write(
+                root / "assets" / "hero.png.import",
+                '[remap]\nuid="uid://imgfromimport"\nsource_file="res://assets/hero.png"\n',
+            )
+            uid_map, _sources, _issues = self._build(root)
+            self.assertEqual(uid_map.get("uid://imgfromimport"), "res://assets/hero.png")
+
+    def test_import_source_is_import(self):
+        with TempProject() as root:
+            _write(
+                root / "assets" / "bg.png.import",
+                '[remap]\nuid="uid://bgimport"\nsource_file="res://assets/bg.png"\n',
+            )
+            _uid_map, uid_sources, _issues = self._build(root)
+            self.assertEqual(uid_sources.get("uid://bgimport"), "import")
+
+    def test_sidecar_beats_import_when_same_uid_same_path(self):
+        """If both sidecar and .import agree on the same path, source=uid_sidecar wins."""
+        with TempProject() as root:
+            _write(root / "scripts" / "foo.gd", "extends Node\n")
+            _write(root / "scripts" / "foo.gd.uid", "uid://foouid\n")
+            _write(
+                root / "scripts" / "foo.gd.import",
+                '[remap]\nuid="uid://foouid"\nsource_file="res://scripts/foo.gd"\n',
+            )
+            _uid_map, uid_sources, issues = self._build(root)
+            self.assertEqual(uid_sources.get("uid://foouid"), "uid_sidecar")
+            self.assertEqual(issues, [])  # same path → no DUPLICATE_UID
+
+
+class TestResolvedPathField(unittest.TestCase):
+    """Tests that ResourceRef.resolved_path / resolved_via are populated correctly."""
+
+    def test_res_path_ref_has_no_resolved_path(self):
+        """A ref with a res:// path should not have resolved_path set."""
+        with TempProject() as root:
+            make_project_with_valid_ref(root)
+            index = scan(root)
+            ref = index.refs[0]
+            self.assertIsNone(ref.resolved_path)
+            self.assertIsNone(ref.resolved_via)
+
+    def test_uid_path_ref_resolved_path_populated(self):
+        """A ref whose path= is uid:// and has a sidecar gets resolved_path set."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="R"\n')
+            _write(root / "scripts" / "player.gd", "extends Node\n")
+            _write(root / "scripts" / "player.gd.uid", "uid://puid\n")
+            _write(
+                root / "scenes" / "Main.tscn",
+                '[gd_scene format=3]\n[ext_resource type="Script" path="uid://puid" id="1"]\n',
+            )
+            index = scan(root)
+            uid_refs = [r for r in index.refs if r.path == "uid://puid"]
+            self.assertEqual(len(uid_refs), 1)
+            self.assertEqual(uid_refs[0].resolved_path, "res://scripts/player.gd")
+            self.assertEqual(uid_refs[0].resolved_via, "uid_sidecar")
+
+    def test_uid_path_ref_resolved_via_import(self):
+        """A ref resolved via .import gets resolved_via='import'."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="R"\n')
+            _write(root / "assets" / "tex.png", "PNG")
+            _write(
+                root / "assets" / "tex.png.import",
+                '[remap]\nuid="uid://teximp"\nsource_file="res://assets/tex.png"\n',
+            )
+            _write(
+                root / "scenes" / "Main.tscn",
+                '[gd_scene format=3]\n[ext_resource type="Texture2D" path="uid://teximp" id="1"]\n',
+            )
+            index = scan(root)
+            uid_refs = [r for r in index.refs if r.path == "uid://teximp"]
+            self.assertEqual(len(uid_refs), 1)
+            self.assertEqual(uid_refs[0].resolved_via, "import")
+            self.assertIsNotNone(uid_refs[0].resolved_path)
+
+    def test_uid_path_missing_sidecar_no_resolved_path(self):
+        """A uid:// ref without any sidecar/import leaves resolved_path=None."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="R"\n')
+            _write(
+                root / "scenes" / "Main.tscn",
+                '[gd_scene format=3]\n[ext_resource type="Script" path="uid://orphan" id="1"]\n',
+            )
+            index = scan(root)
+            uid_refs = [r for r in index.refs if r.path == "uid://orphan"]
+            self.assertEqual(len(uid_refs), 1)
+            self.assertIsNone(uid_refs[0].resolved_path)
+            self.assertIsNone(uid_refs[0].resolved_via)
+
+    def test_json_output_includes_resolved_fields(self):
+        """schema 1.2: JSON refs include resolved_path and resolved_via."""
+        with TempProject() as root:
+            make_project_with_valid_ref(root)
+            index = scan(root)
+            data = json.loads(render_json(build_report(index)))
+            self.assertEqual(data["schema_version"], "1.2")
+            ref = data["refs"][0]
+            self.assertIn("resolved_path", ref)
+            self.assertIn("resolved_via", ref)
+            # For a res:// ref these should be null
+            self.assertIsNone(ref["resolved_path"])
+            self.assertIsNone(ref["resolved_via"])
+
+    def test_uid_resolved_ref_no_missing_error(self):
+        """uid:// path resolved via sidecar to an existing file → no error."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="R"\n')
+            _write(root / "scripts" / "player.gd", "extends Node\n")
+            _write(root / "scripts" / "player.gd.uid", "uid://playeruid\n")
+            _write(
+                root / "scenes" / "Main.tscn",
+                '[gd_scene format=3]\n[ext_resource type="Script" path="uid://playeruid" id="1"]\n',
+            )
+            index = scan(root)
+            missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(missing, [])
+
+    def test_uid_resolved_ref_to_missing_file_is_error(self):
+        """uid:// resolved to a path that doesn't exist → MISSING_EXT_RESOURCE."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="R"\n')
+            # Sidecar points to a file that doesn't exist
+            _write(root / "scripts" / "gone.gd.uid", "uid://goneuid\n")
+            _write(
+                root / "scenes" / "Main.tscn",
+                '[gd_scene format=3]\n[ext_resource type="Script" path="uid://goneuid" id="1"]\n',
+            )
+            index = scan(root)
+            missing = [i for i in index.issues if i.code == "MISSING_EXT_RESOURCE"]
+            self.assertEqual(len(missing), 1)
 
 
 if __name__ == "__main__":

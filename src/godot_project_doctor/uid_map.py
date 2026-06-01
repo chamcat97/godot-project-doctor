@@ -1,36 +1,58 @@
-"""Build a ``uid:// → res://`` mapping from Godot 4 ``.uid`` sidecar files.
+"""Build a ``uid:// → res://`` mapping from multiple Godot 4 sources.
 
-Godot 4 writes a small sidecar file next to every resource it tracks.
-For example, ``res://scripts/player.gd`` may have a sibling
-``res://scripts/player.gd.uid`` whose entire content is a single line::
+Godot 4 records ``uid://`` identifiers for every tracked resource.  This
+module aggregates mappings from three sources in priority order:
 
-    uid://cb6n3abcde7o5
+1. **`*.uid` sidecar files** (highest priority)
+   Godot writes ``scripts/player.gd.uid`` alongside ``scripts/player.gd``.
+   Format: a single line ``uid://cb6n3abcde7o5``.
 
-This module scans the project tree for ``.uid`` files, parses them, and
-returns two artefacts:
+2. **`*.import` files**
+   Godot creates ``assets/hero.png.import`` alongside imported resources.
+   The ``[remap]`` section contains ``uid=`` and ``source_file=`` keys.
 
-1. A ``uid_map`` (``dict[str, str]``) mapping each ``uid://`` string to the
-   corresponding ``res://`` path.
-2. A list of ``DUPLICATE_UID`` issues where two files claim the same UID.
+3. **`.godot/uid_cache.bin`** (best-effort, lowest priority)
+   A binary cache maintained by the Godot editor.  Parsed on a
+   best-effort basis; any parse failure is silently ignored so that
+   projects without an editor-opened `.godot/` directory are unaffected.
+
+All three sources are merged; when different sources agree on the same
+UID→path pair the mapping is accepted.  When different sources assign the
+**same UID to different paths**, a ``DUPLICATE_UID`` WARNING is emitted.
+
+Return value
+------------
+``build_uid_map`` returns ``(uid_map, uid_sources, issues)`` where
+
+* ``uid_map``     — ``dict[str, str]``   uid://... → res://...
+* ``uid_sources`` — ``dict[str, str]``   uid://... → "uid_sidecar" | "import" | "uid_cache"
+* ``issues``      — ``list[Issue]``      DUPLICATE_UID warnings
 
 Limitations
 -----------
-* Only ``.uid`` sidecar files are read.  ``.import`` files and the binary
-  ``.godot/uid_cache.bin`` are **not** parsed in this version.
-* The ``.godot/`` directory is already excluded from the project walk, so
-  import-cache UIDs are unavailable without additional logic.
-* If Godot has not yet generated ``.uid`` files (e.g. a freshly cloned repo
-  that has never been opened), the map will be empty and all ``uid://``
-  references will continue to be skipped silently.
+* ``*.import`` files that lack both ``uid=`` **and** ``source_file=`` in
+  their ``[remap]`` section are silently skipped.
+* ``.godot/uid_cache.bin`` parsing is a best-effort binary heuristic.
+  If the file format changes in a future Godot version, parsing will fail
+  silently and the map will be built from the other two sources only.
 """
 
 from __future__ import annotations
 
+import re
+import struct
 from pathlib import Path
 
 from godot_project_doctor.models import Issue, Severity
 
-# Directories skipped during the main project walk (kept in sync with indexer)
+# Source-priority order (lower index = higher priority)
+_SOURCE_PRIORITY: dict[str, int] = {
+    "uid_sidecar": 0,
+    "import": 1,
+    "uid_cache": 2,
+}
+
+# Directories skipped during the project walk (kept in sync with indexer)
 _SKIP_DIRS = frozenset(
     [
         ".git",
@@ -48,65 +70,94 @@ _SKIP_DIRS = frozenset(
 )
 
 
-def build_uid_map(project_root: Path) -> tuple[dict[str, str], list[Issue]]:
-    """Scan *project_root* for ``.uid`` sidecar files and build a UID mapping.
+# ── Public API ────────────────────────────────────────────────────────────────
 
-    Parameters
-    ----------
-    project_root:
-        Absolute path to the Godot project root.
+
+def build_uid_map(
+    project_root: Path,
+) -> tuple[dict[str, str], dict[str, str], list[Issue]]:
+    """Build a ``uid:// → res://`` mapping for *project_root*.
 
     Returns
     -------
     uid_map : dict[str, str]
-        Maps each ``uid://...`` string to its ``res://`` path.
-        The ``res://`` path is derived from the sidecar file's location:
-        ``scripts/player.gd.uid`` → ``res://scripts/player.gd``.
+        Maps each resolved ``uid://`` string to its ``res://`` path.
+    uid_sources : dict[str, str]
+        Maps each UID to the source that provided the mapping
+        (``"uid_sidecar"``, ``"import"``, or ``"uid_cache"``).
     issues : list[Issue]
-        One ``DUPLICATE_UID`` WARNING per UID that is claimed by more than
-        one file.
+        One ``DUPLICATE_UID`` WARNING per UID claimed by more than one
+        *distinct* ``res://`` path.
     """
-    # uid_string → list of res:// paths that claim it
-    raw: dict[str, list[str]] = {}
+    # uid_str → list of (res_path, source_name) from all sources
+    raw: dict[str, list[tuple[str, str]]] = {}
 
-    for uid_file in _walk_uid_files(project_root):
+    # ── source 1: .uid sidecar files ─────────────────────────────────────────
+    for uid_file in _walk_by_suffix(project_root, ".uid"):
         uid_str = _parse_uid_file(uid_file)
         if not uid_str:
             continue
-
-        # The resource path is the sidecar path without the trailing ".uid"
         rel = uid_file.relative_to(project_root)
         resource_rel = str(rel.with_suffix("")).replace("\\", "/")
-        # Strip the remaining extension suffix (e.g. ".gd" is the actual ext)
-        # The sidecar is "foo.gd.uid" → resource is "foo.gd"
         res_path = f"res://{resource_rel}"
+        raw.setdefault(uid_str, []).append((res_path, "uid_sidecar"))
 
-        raw.setdefault(uid_str, []).append(res_path)
+    # ── source 2: .import files ───────────────────────────────────────────────
+    for import_file in _walk_by_suffix(project_root, ".import"):
+        uid_str, source_file = _parse_import_file(import_file)
+        if uid_str and source_file:
+            raw.setdefault(uid_str, []).append((source_file, "import"))
 
+    # ── source 3: .godot/uid_cache.bin (best-effort) ─────────────────────────
+    for uid_str, res_path in _try_parse_uid_cache(
+        project_root / ".godot" / "uid_cache.bin"
+    ).items():
+        raw.setdefault(uid_str, []).append((res_path, "uid_cache"))
+
+    # ── merge & deduplicate ───────────────────────────────────────────────────
     uid_map: dict[str, str] = {}
+    uid_sources: dict[str, str] = {}
     issues: list[Issue] = []
 
-    for uid_str, paths in sorted(raw.items()):
-        if len(paths) == 1:
-            uid_map[uid_str] = paths[0]
+    for uid_str, entries in sorted(raw.items()):
+        # Group by unique res_path
+        path_to_best: dict[str, tuple[str, str]] = {}
+        for res_path, source in entries:
+            if res_path not in path_to_best or (
+                _SOURCE_PRIORITY.get(source, 99)
+                < _SOURCE_PRIORITY.get(path_to_best[res_path][1], 99)
+            ):
+                path_to_best[res_path] = (res_path, source)
+
+        unique_paths = sorted(path_to_best.keys())
+
+        if len(unique_paths) == 1:
+            res_path, source = path_to_best[unique_paths[0]]
+            uid_map[uid_str] = res_path
+            uid_sources[uid_str] = source
         else:
-            # Multiple files claim the same UID → duplicate
-            sorted_paths = sorted(paths)
-            uid_map[uid_str] = sorted_paths[0]  # use first deterministically
+            # Multiple *distinct* paths claim the same UID → DUPLICATE_UID
+            best_path = unique_paths[0]
+            best_source = path_to_best[best_path][1]
+            uid_map[uid_str] = best_path
+            uid_sources[uid_str] = best_source
             issues.append(
                 Issue(
                     code="DUPLICATE_UID",
                     severity=Severity.WARNING,
-                    message=f"UID {uid_str!r} is claimed by {len(paths)} files",
+                    message=f"UID {uid_str!r} is claimed by {len(unique_paths)} files",
                     file=None,
                     details=(
-                        f"Files claiming this UID: {', '.join(sorted_paths)}. "
-                        "Godot will only bind one of them; the others may fail to load."
+                        f"Files: {', '.join(unique_paths)}. "
+                        "Godot will bind only one; the others may fail to load."
                     ),
                 )
             )
 
-    return uid_map, issues
+    return uid_map, uid_sources, issues
+
+
+# ── Per-source parsers ────────────────────────────────────────────────────────
 
 
 def _parse_uid_file(path: Path) -> str | None:
@@ -115,20 +166,134 @@ def _parse_uid_file(path: Path) -> str | None:
         text = path.read_text(encoding="utf-8", errors="replace").strip()
     except OSError:
         return None
-
-    # A valid sidecar contains exactly one line: "uid://..."
-    # Tolerate a trailing newline.
     line = text.splitlines()[0].strip() if text else ""
-    if line.startswith("uid://"):
-        return line
-    return None
+    return line if line.startswith("uid://") else None
 
 
-def _walk_uid_files(root: Path):
-    """Yield all ``*.uid`` files under *root*, skipping ignored directories."""
+def _parse_import_file(path: Path) -> tuple[str | None, str | None]:
+    """Extract ``(uid_str, source_file)`` from a ``.import`` file.
+
+    Only keys inside the ``[remap]`` section are considered.  Returns
+    ``(None, None)`` when either field is absent or the file is unreadable.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, None
+
+    in_remap = False
+    uid_str: str | None = None
+    source_file: str | None = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(";"):
+            continue
+        if line.startswith("["):
+            in_remap = line == "[remap]"
+            continue
+        if not in_remap:
+            continue
+        # key="value" lines
+        if line.startswith('uid="') and line.endswith('"'):
+            val = line[5:-1]
+            if val.startswith("uid://"):
+                uid_str = val
+        elif line.startswith('source_file="') and line.endswith('"'):
+            val = line[13:-1]
+            if val.startswith("res://"):
+                source_file = val
+
+    return uid_str, source_file
+
+
+def _try_parse_uid_cache(cache_path: Path) -> dict[str, str]:
+    """Best-effort extract of uid→res mappings from ``.godot/uid_cache.bin``.
+
+    Godot 4 stores each entry as a pair of length-prefixed UTF-8 strings
+    (4-byte LE uint32 length followed by the UTF-8 content).  The file
+    begins with a 12-byte header (4-byte magic + 4-byte format version +
+    4-byte entry count).  Any deviation from this layout — or any other
+    exception — is caught silently and an empty dict is returned.
+    """
+    result: dict[str, str] = {}
+    try:
+        data = cache_path.read_bytes()
+    except OSError:
+        return result
+
+    try:
+        # Header: 4-byte magic, 4-byte version, 4-byte count
+        if len(data) < 12:
+            return result
+        magic = data[:4]
+        if magic not in (b"GDUC", b"GDRC"):
+            # Unrecognised magic — fall back to regex heuristic
+            return _try_regex_uid_cache(data)
+
+        count = struct.unpack_from("<I", data, 8)[0]
+        pos = 12
+        for _ in range(count):
+            if pos + 4 > len(data):
+                break
+            uid_len = struct.unpack_from("<I", data, pos)[0]
+            pos += 4
+            if pos + uid_len > len(data):
+                break
+            uid_str = data[pos : pos + uid_len].decode("utf-8", errors="replace")
+            pos += uid_len
+
+            if pos + 4 > len(data):
+                break
+            path_len = struct.unpack_from("<I", data, pos)[0]
+            pos += 4
+            if pos + path_len > len(data):
+                break
+            res_path = data[pos : pos + path_len].decode("utf-8", errors="replace")
+            pos += path_len
+
+            if uid_str.startswith("uid://") and res_path.startswith("res://"):
+                result[uid_str] = res_path
+    except Exception:  # noqa: BLE001 — any parse failure is silently ignored
+        pass
+
+    return result
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
+_UID_RE = re.compile(r"uid://[a-z0-9]+")
+_RES_RE = re.compile(r"res://[^\x00\n\r\"']+")
+
+
+def _try_regex_uid_cache(data: bytes) -> dict[str, str]:
+    """Fallback heuristic: scan binary content for uid:// + res:// string pairs."""
+    result: dict[str, str] = {}
+    try:
+        text = data.decode("utf-8", errors="replace")
+        uids = list(_UID_RE.finditer(text))
+        paths = list(_RES_RE.finditer(text))
+
+        # Pair each uid with the nearest following res:// path within 512 chars
+        path_idx = 0
+        for uid_m in uids:
+            uid_end = uid_m.end()
+            while path_idx < len(paths) and paths[path_idx].start() < uid_end:
+                path_idx += 1
+            if path_idx < len(paths):
+                gap = paths[path_idx].start() - uid_end
+                if gap <= 512:
+                    result[uid_m.group()] = paths[path_idx].group()
+    except Exception:  # noqa: BLE001
+        pass
+    return result
+
+
+def _walk_by_suffix(root: Path, suffix: str):
+    """Yield files with *suffix* under *root*, skipping ignored directories."""
     for child in sorted(root.iterdir()):
         if child.is_dir():
             if child.name not in _SKIP_DIRS:
-                yield from _walk_uid_files(child)
-        elif child.is_file() and child.suffix == ".uid":
+                yield from _walk_by_suffix(child, suffix)
+        elif child.is_file() and child.suffix == suffix:
             yield child

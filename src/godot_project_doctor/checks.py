@@ -157,7 +157,9 @@ def _check_missing_export_presets(index: ProjectIndex) -> list[Issue]:
 def _check_missing_external_resources(index: ProjectIndex, project_root: Path) -> list[Issue]:
     issues: list[Issue] = []
     for ref in index.refs:
-        real_path = resolve_ref_path(ref.path, project_root, ref.source_file, index.uid_map)
+        # Use pre-resolved path when available (uid:// resolved via sidecar/import/cache)
+        effective_path = ref.resolved_path if ref.resolved_path else ref.path
+        real_path = resolve_ref_path(effective_path, project_root, ref.source_file, index.uid_map)
         if real_path is None:
             continue  # uid:// not in map — skip to avoid false positives
         if not real_path.exists():
@@ -308,7 +310,9 @@ def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> l
     """
     referenced_rel: set[str] = set()
     for ref in index.refs:
-        canonical = _ref_to_canonical_rel(ref.path, ref.source_file, index.uid_map)
+        # Prefer resolved_path (uid already decoded) over raw path
+        effective_path = ref.resolved_path if ref.resolved_path else ref.path
+        canonical = _ref_to_canonical_rel(effective_path, ref.source_file, index.uid_map)
         if canonical is not None:
             # Normalise path separators for cross-platform comparison
             referenced_rel.add(canonical.replace("\\", "/"))

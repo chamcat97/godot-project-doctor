@@ -9,7 +9,8 @@ from typing import Any
 # Increment when the JSON output shape changes in a backward-incompatible way.
 # 1.0 — initial release
 # 1.1 — added ResourceRef.kind field
-SCHEMA_VERSION = "1.1"
+# 1.2 — added ResourceRef.resolved_path, ResourceRef.resolved_via
+SCHEMA_VERSION = "1.2"
 
 
 class Severity(StrEnum):
@@ -31,13 +32,14 @@ class ResourceRef:
         ext_resource entries; the calling convention (``"preload"``,
         ``"load"``, ``"ResourceLoader.load"``) for GDScript static refs.
     path:
-        Raw resource path as it appears in the source (``res://`` absolute or
-        a relative path for non-GDScript refs).
+        Raw resource path as it appears in the source (``res://`` absolute,
+        a ``uid://`` identifier, or a relative path).
     ref_id:
         Intra-file identifier used by ``[ext_resource]`` entries; empty string
         for GDScript refs.
     uid:
-        Godot UID string (``uid://...``) when present; ``None`` otherwise.
+        Godot UID string (``uid://...``) from the ``uid=`` attribute when
+        present; ``None`` otherwise.
     kind:
         Origin of the reference.  One of:
 
@@ -47,16 +49,33 @@ class ResourceRef:
           ``preload()``, ``load()``, or ``ResourceLoader.load()`` in a
           ``.gd`` file.
 
-        Added in schema 1.1.  Consumers that only need the path can ignore
-        this field.
+        Added in schema 1.1.
+    resolved_path:
+        When ``path`` is a ``uid://`` reference that was successfully resolved
+        via a ``.uid`` sidecar, ``.import`` file, or ``uid_cache.bin``, this
+        field holds the resolved ``res://`` path.  ``None`` when the path is
+        already a ``res://`` path or when the UID could not be resolved.
+
+        Added in schema 1.2.
+    resolved_via:
+        The source that provided the ``resolved_path``.  One of:
+
+        * ``"uid_sidecar"`` — resolved from a ``*.uid`` sidecar file.
+        * ``"import"``      — resolved from a ``*.import`` file.
+        * ``"uid_cache"``   — resolved from ``.godot/uid_cache.bin``.
+        * ``None``          — not applicable (path was not a ``uid://``).
+
+        Added in schema 1.2.
     """
 
     source_file: str  # relative path within project
     ref_type: str  # Godot class or call type
-    path: str  # raw resource path (res:// or relative)
+    path: str  # raw resource path (res://, uid://, or relative)
     ref_id: str  # id within declaring file; "" for GDScript refs
     uid: str | None = None
     kind: str = "ext_resource"  # "ext_resource" | "gdscript"
+    resolved_path: str | None = None  # set when path is uid:// and resolved
+    resolved_via: str | None = None  # "uid_sidecar" | "import" | "uid_cache"
 
 
 @dataclass
@@ -150,9 +169,10 @@ class ProjectIndex:
     has_export_presets: bool = False
     refs: list[ResourceRef] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
-    # uid:// → res:// mapping built from .uid sidecar files.
-    # Not included in JSON output (can be large; internal use only).
+    # Internal uid:// → res:// mapping.  Not serialised to JSON.
     uid_map: dict[str, str] = field(default_factory=dict)
+    # Source of each UID resolution.  Not serialised to JSON.
+    uid_sources: dict[str, str] = field(default_factory=dict)
 
     @property
     def issue_counts(self) -> dict[str, int]:
@@ -189,6 +209,8 @@ class ScanReport:
                     "uid": r.uid,
                     "path": r.path,
                     "id": r.ref_id,
+                    "resolved_path": r.resolved_path,
+                    "resolved_via": r.resolved_via,
                 }
                 for r in self.refs
             ],
