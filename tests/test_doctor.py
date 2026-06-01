@@ -2564,9 +2564,7 @@ class TestExtractInputActionRefs(unittest.TestCase):
         self.assertEqual(refs, [("move_right", "player.gd")])
 
     def test_action_press_and_release(self):
-        refs = self._extract(
-            'Input.action_press("jump")\nInput.action_release("jump")\n'
-        )
+        refs = self._extract('Input.action_press("jump")\nInput.action_release("jump")\n')
         names = [r[0] for r in refs]
         self.assertEqual(names, ["jump", "jump"])
 
@@ -2579,7 +2577,7 @@ class TestExtractInputActionRefs(unittest.TestCase):
         self.assertEqual(refs, [])
 
     def test_inside_string_skipped(self):
-        refs = self._extract('var s = \'Input.is_action_pressed("jump")\'\n')
+        refs = self._extract("var s = 'Input.is_action_pressed(\"jump\")'\n")
         self.assertEqual(refs, [])
 
     def test_dynamic_expression_skipped(self):
@@ -2587,9 +2585,7 @@ class TestExtractInputActionRefs(unittest.TestCase):
         self.assertEqual(refs, [])
 
     def test_multiple_refs_in_one_file(self):
-        refs = self._extract(
-            'Input.is_action_pressed("jump")\nInput.is_action_pressed("fire")\n'
-        )
+        refs = self._extract('Input.is_action_pressed("jump")\nInput.is_action_pressed("fire")\n')
         self.assertEqual(len(refs), 2)
 
 
@@ -2715,11 +2711,7 @@ class TestParseSceneForConnections(unittest.TestCase):
         self.assertEqual(id_to_path.get("1"), "res://player.gd")
 
     def test_blank_lines_dont_break_node_block(self):
-        text = (
-            '[node name="Main" type="Node2D"]\n'
-            "\n"
-            'script = ExtResource("1")\n'
-        )
+        text = '[node name="Main" type="Node2D"]\n\nscript = ExtResource("1")\n'
         _, node_scripts, _ = self._parse(text)
         self.assertIn("", node_scripts)
 
@@ -2742,7 +2734,7 @@ class TestBrokenSignalConnectionCheck(unittest.TestCase):
 
     def _make_scene(self, method_name="_on_button_pressed", script_rel="res://handler.gd"):
         return (
-            f'[gd_scene load_steps=2 format=3]\n'
+            f"[gd_scene load_steps=2 format=3]\n"
             f'[ext_resource type="Script" path="{script_rel}" id="1"]\n'
             f'[node name="Main" type="Node2D"]\n'
             f'script = ExtResource("1")\n'
@@ -2776,7 +2768,7 @@ class TestBrokenSignalConnectionCheck(unittest.TestCase):
 
     def test_no_script_on_target_node_skipped(self):
         scene = (
-            '[gd_scene load_steps=1 format=3]\n'
+            "[gd_scene load_steps=1 format=3]\n"
             '[node name="Main" type="Node2D"]\n'
             '[node name="Button" type="Button" parent="."]\n'
             '[connection signal="pressed" from="Button" to="." method="_on_btn"]\n'
@@ -2786,7 +2778,7 @@ class TestBrokenSignalConnectionCheck(unittest.TestCase):
 
     def test_unresolvable_to_path_skipped(self):
         scene = (
-            '[gd_scene load_steps=2 format=3]\n'
+            "[gd_scene load_steps=2 format=3]\n"
             '[ext_resource type="Script" path="res://handler.gd" id="1"]\n'
             '[node name="Main" type="Node2D"]\n'
             'script = ExtResource("1")\n'
@@ -2831,7 +2823,7 @@ class TestUnusedScriptCheck(unittest.TestCase):
                 "project.godot": '[application]\nconfig/name="Game"\n',
                 "player.gd": "extends CharacterBody2D\n",
                 "scenes/Main.tscn": (
-                    '[gd_scene format=3]\n'
+                    "[gd_scene format=3]\n"
                     '[ext_resource type="Script" path="res://player.gd" id="1"]\n'
                     '[node name="Player" type="CharacterBody2D"]\n'
                     'script = ExtResource("1")\n'
@@ -2932,8 +2924,7 @@ class TestUnusedAutoloadCheck(unittest.TestCase):
         issues = self._run(
             {
                 "project.godot": (
-                    '[application]\nconfig/name="Game"\n'
-                    '[autoload]\nDeadCode="res://dead_code.gd"\n'
+                    '[application]\nconfig/name="Game"\n[autoload]\nDeadCode="res://dead_code.gd"\n'
                 ),
                 "dead_code.gd": "extends Node\n",
                 "player.gd": "extends CharacterBody2D\n",
@@ -2957,8 +2948,7 @@ class TestUnusedAutoloadCheck(unittest.TestCase):
         issues = self._run(
             {
                 "project.godot": (
-                    '[application]\nconfig/name="Game"\n'
-                    '[autoload]\nOrphan="res://orphan.gd"\n'
+                    '[application]\nconfig/name="Game"\n[autoload]\nOrphan="res://orphan.gd"\n'
                 ),
                 "orphan.gd": "extends Node\n",
             }
@@ -2971,7 +2961,7 @@ class TestUnusedAutoloadCheck(unittest.TestCase):
             {
                 "project.godot": (
                     '[application]\nconfig/name="Game"\n'
-                    '[autoload]\n'
+                    "[autoload]\n"
                     'Zzz="res://zzz.gd"\n'
                     'Aaa="res://aaa.gd"\n'
                 ),

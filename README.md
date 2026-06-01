@@ -1,4 +1,4 @@
-# godot-project-doctor [![version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/chamcat97/godot-project-doctor)
+# godot-project-doctor [![version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/chamcat97/godot-project-doctor)
 
 A deterministic CLI auditor for [Godot 4](https://godotengine.org/) projects.
 
@@ -186,7 +186,7 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 
 ```yaml
 # .github/workflows/godot-doctor.yml
-- uses: chamcat97/godot-project-doctor@v0.5.0
+- uses: chamcat97/godot-project-doctor@v0.8.0
   with:
     project-path: .
     fail-on: warning
