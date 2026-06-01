@@ -8,6 +8,7 @@ from typing import Optional
 
 import click
 
+from godot_project_doctor.graph import build_graph, render_mermaid_graph, render_text_graph
 from godot_project_doctor.reporter import build_report, render_json, render_markdown, render_text
 from godot_project_doctor.scanner import GodotProjectError, scan
 
@@ -67,3 +68,44 @@ def scan_cmd(project_path: Path, fmt: str, output: Optional[Path]) -> None:
     # Exit code 1 if there are any ERRORs
     if index.issue_counts.get("ERROR", 0) > 0:
         sys.exit(1)
+
+
+@main.command("graph")
+@click.argument("project_path", type=click.Path(path_type=Path))
+@click.option(
+    "--format", "-f",
+    "fmt",
+    type=click.Choice(["text", "mermaid"], case_sensitive=False),
+    default="text",
+    show_default=True,
+    help="Output format.",
+)
+@click.option(
+    "--output", "-o",
+    type=click.Path(path_type=Path, writable=True),
+    default=None,
+    help="Write output to this file instead of stdout.",
+)
+def graph_cmd(project_path: Path, fmt: str, output: Optional[Path]) -> None:
+    """Generate a dependency graph from parsed Godot text resources."""
+    try:
+        index = scan(project_path)
+    except NotADirectoryError as exc:
+        click.echo(click.style(f"Error: {exc}", fg="red", bold=True), err=True)
+        sys.exit(2)
+    except GodotProjectError as exc:
+        click.echo(click.style(f"Error: {exc}", fg="red", bold=True), err=True)
+        sys.exit(1)
+
+    graph = build_graph(index)
+
+    if fmt == "mermaid":
+        text = render_mermaid_graph(graph)
+    else:
+        text = render_text_graph(graph)
+
+    if output:
+        output.write_text(text, encoding="utf-8")
+        click.echo(click.style(f"Graph written to {output}", fg="green"), err=True)
+    else:
+        click.echo(text, nl=False)

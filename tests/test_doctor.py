@@ -12,6 +12,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from godot_project_doctor.checks import run_all_checks
+from godot_project_doctor.graph import build_graph, render_mermaid_graph, render_text_graph
 from godot_project_doctor.indexer import index_project, resolve_res_path
 from godot_project_doctor.models import (
     Issue,
@@ -391,6 +392,152 @@ class TestJsonOutput(unittest.TestCase):
             ref = data["refs"][0]
             self.assertEqual(ref["path"], "res://player/player.gd")
             self.assertEqual(ref["type"], "Script")
+
+
+# ─── Dependency graph ─────────────────────────────────────────────────────────
+
+
+def make_project_simple_graph(root: Path) -> Path:
+    """One scene referencing one script."""
+    _write(root / "project.godot", '[application]\nconfig/name="SimpleGraph"\n')
+    _write(root / "player" / "player.gd", "extends CharacterBody2D\n")
+    _write(root / "scenes" / "Player.tscn", """\
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://abc" path="res://player/player.gd" id="1"]
+
+[node name="Player" type="CharacterBody2D"]
+script = ExtResource("1")
+""")
+    return root
+
+
+def make_project_multi_ref_graph(root: Path) -> Path:
+    """One scene referencing both a Script and a PackedScene."""
+    _write(root / "project.godot", '[application]\nconfig/name="MultiRef"\n')
+    _write(root / "scripts" / "enemy.gd", "extends Node\n")
+    _write(root / "scenes" / "Bullet.tscn",
+           '[gd_scene format=3]\n\n[node name="Bullet" type="Node"]\n')
+    _write(root / "scenes" / "Enemy.tscn", """\
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/enemy.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/Bullet.tscn" id="2"]
+
+[node name="Enemy" type="Node"]
+script = ExtResource("1")
+""")
+    return root
+
+
+class TestDependencyGraph(unittest.TestCase):
+    # ── build_graph ──────────────────────────────────────────────────────────
+
+    def test_simple_graph_has_one_source(self):
+        with TempProject() as root:
+            make_project_simple_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            self.assertEqual(len(graph), 1)
+
+    def test_simple_graph_edge_correct(self):
+        with TempProject() as root:
+            make_project_simple_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            source = next(iter(graph))
+            self.assertIn("Player.tscn", source)
+            self.assertEqual(graph[source], ["res://player/player.gd"])
+
+    def test_multi_ref_graph_has_two_deps(self):
+        with TempProject() as root:
+            make_project_multi_ref_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            # Enemy.tscn is the only source with ext_resources
+            enemy_key = next(k for k in graph if "Enemy.tscn" in k)
+            self.assertEqual(len(graph[enemy_key]), 2)
+
+    def test_multi_ref_graph_contains_script_and_packed_scene(self):
+        with TempProject() as root:
+            make_project_multi_ref_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            enemy_key = next(k for k in graph if "Enemy.tscn" in k)
+            deps = graph[enemy_key]
+            self.assertIn("res://scripts/enemy.gd", deps)
+            self.assertIn("res://scenes/Bullet.tscn", deps)
+
+    def test_empty_project_graph_is_empty(self):
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="Empty"\n')
+            _write(root / "scenes" / "Main.tscn",
+                   '[gd_scene format=3]\n\n[node name="Main" type="Node"]\n')
+            index = scan(root)
+            graph = build_graph(index)
+            self.assertEqual(graph, {})
+
+    # ── render_text_graph ────────────────────────────────────────────────────
+
+    def test_text_output_contains_source_file(self):
+        with TempProject() as root:
+            make_project_simple_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            text = render_text_graph(graph)
+            self.assertIn("Player.tscn", text)
+
+    def test_text_output_contains_dep_arrow(self):
+        with TempProject() as root:
+            make_project_simple_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            text = render_text_graph(graph)
+            self.assertIn("  -> res://player/player.gd", text)
+
+    def test_text_output_empty_graph_message(self):
+        graph: dict = {}
+        text = render_text_graph(graph)
+        self.assertIn("no dependencies", text)
+
+    # ── render_mermaid_graph ─────────────────────────────────────────────────
+
+    def test_mermaid_starts_with_flowchart(self):
+        with TempProject() as root:
+            make_project_simple_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            mermaid = render_mermaid_graph(graph)
+            self.assertTrue(mermaid.startswith("flowchart TD"))
+
+    def test_mermaid_contains_edge_arrow(self):
+        with TempProject() as root:
+            make_project_simple_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            mermaid = render_mermaid_graph(graph)
+            self.assertIn("-->", mermaid)
+
+    def test_mermaid_multi_ref_has_two_edges(self):
+        with TempProject() as root:
+            make_project_multi_ref_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            mermaid = render_mermaid_graph(graph)
+            self.assertEqual(mermaid.count("-->"), 2)
+
+    def test_mermaid_node_ids_are_stable(self):
+        """Two calls with the same graph must produce identical output."""
+        with TempProject() as root:
+            make_project_multi_ref_graph(root)
+            index = scan(root)
+            graph = build_graph(index)
+            self.assertEqual(render_mermaid_graph(graph), render_mermaid_graph(graph))
+
+    def test_mermaid_empty_graph_message(self):
+        graph: dict = {}
+        mermaid = render_mermaid_graph(graph)
+        self.assertIn("no dependencies", mermaid)
 
 
 if __name__ == "__main__":
