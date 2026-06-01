@@ -65,9 +65,9 @@ Scanned 12 scenes, 18 scripts. 2 errors, 2 warnings, 1 info.
 ### `scan` — 문제 검사
 
 ```
-gdoctor scan <project_path> [--format text|json|markdown] [--output <path>]
+gdoctor scan <project_path> [--format text|json|markdown|sarif] [--output <path>]
               [--fail-on error|warning|info|none] [--strict]
-              [--config <path>] [--no-config]
+              [--config <path>] [--no-config] [--include-addons]
 ```
 
 ```bash
@@ -86,21 +86,35 @@ gdoctor scan ./my-godot-game --strict
 # 종료 코드를 항상 0으로 (실패 처리 안 함)
 gdoctor scan ./my-godot-game --fail-on none
 
+# res://addons/ 의 서드파티 플러그인 코드까지 검사
+gdoctor scan ./my-godot-game --include-addons
+
 # 명시적 설정 파일 사용
 gdoctor scan ./my-godot-game --config ci-strict.toml
 ```
 
+> **`addons/`는 기본적으로 제외됩니다.** `res://addons/`와
+> `res://script_templates/`의 서드파티/에디터 코드는 에디터가 로드하거나
+> `class_name`으로 참조되어, 검사하면 거짓 양성으로 실제 문제를 묻어버립니다.
+> 함께 검사하려면 `--include-addons`를 주거나 `ignore_addons = false`로 설정하세요.
+
 #### 설정 파일
 
-`gdoctor`는 `pyproject.toml`의 `[tool.gdoctor]` 섹션 또는 프로젝트 루트의
-`.gdoctor.toml`을 읽습니다. 모든 설정 파일을 무시하려면 `--no-config`를 사용하세요.
+`gdoctor`는 두 곳 중 하나에서 설정을 읽습니다:
+
+- **`pyproject.toml`** — `[tool.gdoctor]` 테이블 아래 (키에 네임스페이스 적용).
+- **`.gdoctor.toml`**(프로젝트 루트) 또는 `--config <path>` — 키가 파일
+  **루트**에 위치하며 `[tool.gdoctor]` 접두사가 **없습니다**.
+
+모든 설정 파일을 무시하려면 `--no-config`를 사용하세요.
 
 ```toml
-# pyproject.toml
+# pyproject.toml  →  [tool.gdoctor] 아래 네임스페이스
 [tool.gdoctor]
 large_texture_dim  = 1024          # 1024px 초과 텍스처 경고 (기본 2048)
 large_audio_bytes  = 5_242_880     # 5MB 초과 오디오 경고 (기본 10MB)
 ignore             = ["assets/vendor/**", "*.tmp.gd"]
+ignore_addons      = true          # addons/ & script_templates/ 제외 (기본값)
 
 [tool.gdoctor.severity]
 UNUSED_ASSET_CANDIDATE = "info"    # INFO로 강등
@@ -110,6 +124,15 @@ NO_EXPORT_PRESETS      = "none"    # 완전히 억제
 code    = "MISSING_EXT_RESOURCE"
 file    = "scenes/legacy/Old.tscn"
 message = "External resource not found: res://legacy/old.gd"
+```
+
+```toml
+# .gdoctor.toml  →  같은 키지만 루트에 ([tool.gdoctor] 없음)
+large_texture_dim = 1024
+ignore            = ["assets/vendor/**"]
+
+[severity]
+UNUSED_ASSET_CANDIDATE = "info"
 ```
 
 ### `graph` — 의존성 그래프
@@ -208,7 +231,7 @@ gdoctor scan ./my-godot-game --format sarif --output gdoctor.sarif
 
 ```yaml
 # .github/workflows/godot-doctor.yml
-- uses: chamcat97/godot-project-doctor@v0.8.1
+- uses: chamcat97/godot-project-doctor@v0.8.2
   with:
     project-path: .
     fail-on: warning
@@ -234,7 +257,7 @@ gdoctor scan ./my-godot-game --format sarif --output gdoctor.sarif
 | `UNDEFINED_INPUT_ACTION` | WARNING | GDScript가 `Input.is_action_*()`/`get_action_strength()`를 `project.godot`의 `[input]`에 선언되지 않은 이름으로 호출함 (내장 `ui_*` 액션은 제외) |
 | `UNUSED_AUTOLOAD` | WARNING | 오토로드 싱글톤 이름이 어떤 `.gd` 파일에서도 참조되지 않음 (`get_node('/root/...')` 접근이나 비-GDScript 코드는 거짓 양성) |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | 파싱된 어떤 씬·리소스·스크립트에서도 참조되지 않는 에셋 |
-| `UNUSED_SCRIPT` | WARNING | 어떤 씬·리소스·오토로드에서도 참조되지 않는 `.gd` 파일 (문자열 `extends`로 사용되거나 동적 로드되는 스크립트는 거짓 양성) |
+| `UNUSED_SCRIPT` | WARNING | 어떤 씬·리소스·오토로드·`class_name` 사용에서도 참조되지 않는 `.gd` 파일 (`extends`·타입 변수·씬 노드 `type=`은 추적됨; 동적 로드·tool 스크립트는 여전히 거짓 양성일 수 있음) |
 | `NO_MAIN_SCENE` | INFO | `run/main_scene`이 설정되지 않음 (라이브러리 프로젝트에서는 의도적일 수 있음) |
 | `NO_EXPORT_PRESETS` | INFO | `export_presets.cfg`가 없음 |
 

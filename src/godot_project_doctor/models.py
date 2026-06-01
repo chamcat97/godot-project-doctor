@@ -142,6 +142,8 @@ class ProjectSummary:
     main_scene: str | None = None
     autoloads: dict[str, str] = field(default_factory=dict)
     godot_version_hint: str | None = None
+    # Project icon from application/config/icon.  Not serialised to JSON.
+    icon: str | None = None
     # Input actions declared in the [input] section.  Not serialised to JSON.
     input_actions: set[str] = field(default_factory=set)
 

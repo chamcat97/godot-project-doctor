@@ -63,6 +63,11 @@ def parse_project_godot(project_root: Path) -> ProjectSummary:
                 m = re.match(r'^run/main_scene\s*=\s*"([^"]*)"', line)
                 if m:
                     summary.main_scene = m.group(1)
+            # config/icon="res://icon.svg"
+            elif line.startswith("config/icon"):
+                m = re.match(r'^config/icon\s*=\s*"([^"]*)"', line)
+                if m:
+                    summary.icon = m.group(1)
 
         elif current_section == "autoload":
             # NodeName="*res://autoload/MySingleton.gd"

@@ -88,6 +88,11 @@ class Config:
     ignore: list[str] = field(default_factory=list)
     severity_overrides: dict[str, str] = field(default_factory=dict)
     baseline: list[BaselineEntry] = field(default_factory=list)
+    # Editor/plugin tooling under res://addons/ and res://script_templates/ is
+    # excluded by default — its scripts/assets are loaded by the editor or
+    # referenced by class_name, which produces overwhelming false positives.
+    # Set to False (or pass --include-addons) to audit that code as well.
+    ignore_addons: bool = True
 
     # ── Derived helpers ───────────────────────────────────────────────────────
 
@@ -108,10 +113,17 @@ class Config:
         return mapping.get(raw, original)
 
     def is_ignored(self, file_path: str | None) -> bool:
-        """Return ``True`` when *file_path* matches any ignore glob."""
-        if not file_path or not self.ignore:
+        """Return ``True`` when *file_path* matches any ignore glob.
+
+        Files under ``addons/`` are ignored by default (``ignore_addons``).
+        """
+        if not file_path:
             return False
         norm = file_path.replace("\\", "/")
+        if self.ignore_addons and any(
+            norm == d or norm.startswith(d + "/") for d in ("addons", "script_templates")
+        ):
+            return True
         return any(fnmatch.fnmatch(norm, pat) for pat in self.ignore)
 
     def is_baseline(self, issue: Issue) -> bool:
@@ -195,6 +207,11 @@ def _build_config(raw: dict) -> Config:
         val = raw["ignore"]
         if isinstance(val, list):
             cfg.ignore = [str(p) for p in val if isinstance(p, str)]
+
+    if "ignore_addons" in raw:
+        val = raw["ignore_addons"]
+        if isinstance(val, bool):
+            cfg.ignore_addons = val
 
     if "severity" in raw:
         val = raw["severity"]

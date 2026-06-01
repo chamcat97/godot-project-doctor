@@ -65,9 +65,9 @@ Scanned 12 scenes, 18 scripts. 2 errors, 2 warnings, 1 info.
 ### `scan` — audit for issues
 
 ```
-gdoctor scan <project_path> [--format text|json|markdown] [--output <path>]
+gdoctor scan <project_path> [--format text|json|markdown|sarif] [--output <path>]
               [--fail-on error|warning|info|none] [--strict]
-              [--config <path>] [--no-config]
+              [--config <path>] [--no-config] [--include-addons]
 ```
 
 ```bash
@@ -86,21 +86,36 @@ gdoctor scan ./my-godot-game --strict
 # Suppress exit code entirely (always exits 0)
 gdoctor scan ./my-godot-game --fail-on none
 
+# Also audit third-party plugin code under res://addons/
+gdoctor scan ./my-godot-game --include-addons
+
 # Use an explicit config file
 gdoctor scan ./my-godot-game --config ci-strict.toml
 ```
 
+> **`addons/` is ignored by default.** Third-party plugin code under
+> `res://addons/` and `res://script_templates/` is excluded, because it is
+> loaded by the editor or referenced by `class_name` and would otherwise drown
+> real findings in false positives. Pass `--include-addons` (or set
+> `ignore_addons = false`) to audit it too.
+
 #### Configuration file
 
-`gdoctor` reads `[tool.gdoctor]` from `pyproject.toml`, or `.gdoctor.toml`
-in the project root.  Use `--no-config` to ignore all config files.
+`gdoctor` reads configuration from one of two places:
+
+- **`pyproject.toml`** — under a `[tool.gdoctor]` table (keys are namespaced).
+- **`.gdoctor.toml`** (project root) or `--config <path>` — keys live at the
+  **root** of the file, with **no** `[tool.gdoctor]` prefix.
+
+Use `--no-config` to ignore all config files.
 
 ```toml
-# pyproject.toml
+# pyproject.toml  →  namespaced under [tool.gdoctor]
 [tool.gdoctor]
 large_texture_dim  = 1024          # warn on textures > 1024 px (default 2048)
 large_audio_bytes  = 5_242_880     # warn on audio > 5 MB (default 10 MB)
 ignore             = ["assets/vendor/**", "*.tmp.gd"]
+ignore_addons      = true          # exclude addons/ & script_templates/ (default)
 
 [tool.gdoctor.severity]
 UNUSED_ASSET_CANDIDATE = "info"    # downgrade to INFO
@@ -110,6 +125,15 @@ NO_EXPORT_PRESETS      = "none"    # suppress entirely
 code    = "MISSING_EXT_RESOURCE"
 file    = "scenes/legacy/Old.tscn"
 message = "External resource not found: res://legacy/old.gd"
+```
+
+```toml
+# .gdoctor.toml  →  same keys, but at the root (no [tool.gdoctor])
+large_texture_dim = 1024
+ignore            = ["assets/vendor/**"]
+
+[severity]
+UNUSED_ASSET_CANDIDATE = "info"
 ```
 
 ### `graph` — dependency graph
@@ -208,7 +232,7 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 
 ```yaml
 # .github/workflows/godot-doctor.yml
-- uses: chamcat97/godot-project-doctor@v0.8.1
+- uses: chamcat97/godot-project-doctor@v0.8.2
   with:
     project-path: .
     fail-on: warning
@@ -234,7 +258,7 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 | `UNDEFINED_INPUT_ACTION` | WARNING | GDScript calls `Input.is_action_*()`/`get_action_strength()` with a name not declared in `project.godot` `[input]` (built-in `ui_*` actions excluded) |
 | `UNUSED_AUTOLOAD` | WARNING | Autoload singleton name not referenced in any `.gd` file (access via `get_node('/root/...')` or non-GDScript code are false positives) |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene, resource, or script |
-| `UNUSED_SCRIPT` | WARNING | `.gd` file not referenced by any scene, resource, or autoload (scripts used via string `extends` or dynamically loaded are false positives) |
+| `UNUSED_SCRIPT` | WARNING | `.gd` file not referenced by any scene, resource, autoload, or `class_name` usage (`extends`, typed vars, scene node `type=`, are tracked; dynamically loaded or tool scripts may still be false positives) |
 | `NO_MAIN_SCENE` | INFO | `run/main_scene` is not configured (may be intentional for library projects) |
 | `NO_EXPORT_PRESETS` | INFO | `export_presets.cfg` is absent |
 

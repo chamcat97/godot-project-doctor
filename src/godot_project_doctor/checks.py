@@ -569,6 +569,12 @@ def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> l
             # Normalise path separators for cross-platform comparison
             referenced_rel.add(canonical.replace("\\", "/"))
 
+    # The project icon (application/config/icon) is referenced even though it
+    # never appears in an ext_resource block.
+    icon = index.summary.icon
+    if icon and icon.startswith("res://"):
+        referenced_rel.add(icon[len("res://") :].replace("\\", "/"))
+
     asset_files = list(index.images) + list(index.audio)
     issues: list[Issue] = []
 
@@ -592,6 +598,70 @@ def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> l
     return issues
 
 
+# Matches a `class_name MyClass` declaration at the start of a line.
+_CLASS_NAME_DECL_RE = re.compile(r"^\s*class_name\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
+
+
+def _collect_class_name_usage(
+    index: ProjectIndex, project_root: Path
+) -> tuple[dict[str, str], set[str]]:
+    """Map each script that declares a ``class_name`` to that name, and return
+    the set of class names referenced *outside* their own declaring file.
+
+    A script registered with ``class_name`` is referenced by that identifier —
+    via ``extends MyClass``, a typed variable, ``MyClass.new()``, or a scene
+    node ``type="MyClass"`` — never by its ``res://`` path.  Tracking these
+    occurrences removes the bulk of ``UNUSED_SCRIPT`` false positives.
+
+    Returns
+    -------
+    (script_to_class, used_names)
+        ``script_to_class`` maps a normalised script path to the class name it
+        declares; ``used_names`` is the set of class names seen elsewhere.
+    """
+    decls: dict[str, str] = {}  # class_name -> declaring script (normalised rel)
+    script_text: dict[str, str] = {}
+
+    for script in index.scripts:
+        norm = script.replace("\\", "/")
+        try:
+            text = (project_root / script).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        script_text[norm] = text
+        m = _CLASS_NAME_DECL_RE.search(text)
+        if m:
+            decls.setdefault(m.group(1), norm)
+
+    if not decls:
+        return {}, set()
+
+    # Single alternation regex over all declared class names (longest first so
+    # overlapping names match greedily); whole-word boundaries only.
+    alt = re.compile(
+        r"\b(" + "|".join(re.escape(n) for n in sorted(decls, key=len, reverse=True)) + r")\b"
+    )
+
+    used: set[str] = set()
+    # GDScript files (reuse already-read text).
+    for norm, text in script_text.items():
+        for m in alt.finditer(text):
+            name = m.group(1)
+            if decls.get(name) != norm:  # appears outside its own declaration file
+                used.add(name)
+    # Scenes and resources (a node `type="MyClass"` counts as usage).
+    for rel in list(index.scenes) + list(index.resources):
+        try:
+            text = (project_root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in alt.finditer(text):
+            used.add(m.group(1))
+
+    script_to_class = {script: name for name, script in decls.items()}
+    return script_to_class, used
+
+
 def _check_unused_scripts(index: ProjectIndex, project_root: Path) -> list[Issue]:
     """Flag .gd scripts not referenced by any scene, resource, or autoload.
 
@@ -602,11 +672,12 @@ def _check_unused_scripts(index: ProjectIndex, project_root: Path) -> list[Issue
     * A static ``preload()`` / ``load()`` / ``ResourceLoader.load()`` call in
       any ``.gd`` file.
     * An autoload entry in ``project.godot``.
+    * **A ``class_name`` declaration whose name is referenced elsewhere** (via
+      ``extends``, a typed variable, ``ClassName.new()``, or a scene node
+      ``type="ClassName"``).
 
     Known false-positive sources (reported in ``details``)
     -------------------------------------------------------
-    * Scripts used as base classes via ``extends "res://path/to/base.gd"``
-      are not tracked as references.
     * Tool scripts run by the Godot editor are not distinguishable statically.
     * Dynamically loaded scripts (``load(variable)``) are not tracked.
     """
@@ -625,23 +696,31 @@ def _check_unused_scripts(index: ProjectIndex, project_root: Path) -> list[Issue
         if path.startswith("res://"):
             referenced.add(path[len("res://") :].replace("\\", "/"))
 
+    # Scripts registered with a class_name that is used elsewhere are referenced.
+    script_to_class, used_class_names = _collect_class_name_usage(index, project_root)
+
     issues: list[Issue] = []
     for script in index.scripts:
-        if script.replace("\\", "/") not in referenced:
-            issues.append(
-                Issue(
-                    code="UNUSED_SCRIPT",
-                    severity=Severity.WARNING,
-                    message=f"Script not referenced by any scene, resource, or autoload: {script}",
-                    file=script,
-                    details=(
-                        "This .gd file was not found in any ext_resource declaration, "
-                        "static load()/preload() call, or autoload entry. "
-                        "It may be used as a base class via extends (not tracked), "
-                        "loaded dynamically, or genuinely unused."
-                    ),
-                )
+        norm = script.replace("\\", "/")
+        if norm in referenced:
+            continue
+        cls = script_to_class.get(norm)
+        if cls and cls in used_class_names:
+            continue  # referenced via class_name (extends / type / node type)
+        issues.append(
+            Issue(
+                code="UNUSED_SCRIPT",
+                severity=Severity.WARNING,
+                message=f"Script not referenced by any scene, resource, or autoload: {script}",
+                file=script,
+                details=(
+                    "This .gd file was not found in any ext_resource declaration, "
+                    "static load()/preload() call, autoload entry, or class_name "
+                    "reference. It may be a tool/editor script, loaded dynamically "
+                    "via load(variable), or genuinely unused."
+                ),
             )
+        )
     return issues
 
 

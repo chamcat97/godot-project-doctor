@@ -10,6 +10,37 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.2] — 2026-06-01
+
+Signal-to-noise release — validated against a real 86-script project where the
+default scan dropped from 77 warnings (≈99% false positives) to 2 genuine ones.
+
+### Added
+- **`addons/` ignored by default.** Third-party plugin code under
+  `res://addons/` and `res://script_templates/` is now excluded by default
+  (`Config.ignore_addons`, on by default). Pass `--include-addons` on the CLI
+  or set `ignore_addons = false` in config to audit it. Editor/plugin code is
+  loaded by the engine or referenced by `class_name`, so auditing it produced
+  overwhelming false positives.
+- **`class_name` reference tracking in `UNUSED_SCRIPT`.** A script registered
+  with `class_name X` is now considered referenced when `X` appears via
+  `extends X`, a typed variable, `X.new()`, or a scene node `type="X"` — not
+  only by its `res://` path. Removes the systematic false positives for data
+  classes and custom-node scripts.
+- **`application/config/icon` parsing.** The project icon (e.g. `icon.svg`) is
+  now recognised as a referenced asset and no longer flagged
+  `UNUSED_ASSET_CANDIDATE`. Stored on `ProjectSummary.icon` (not serialised).
+
+### Changed
+- `__version__` bumped to `"0.8.2"`.
+
+### Notes
+- `.gdoctor.toml` / `--config` files use **root-level** keys (no
+  `[tool.gdoctor]` prefix); only `pyproject.toml` uses the namespaced table.
+  This was always the case but is now documented explicitly in the README.
+
+---
+
 ## [0.8.1] — 2026-06-01
 
 ### Fixed
@@ -226,7 +257,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - `project.godot` metadata parsing.
 - Dependency graph builder and Mermaid/text renderers.
 
-[Unreleased]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/chamcat97/godot-project-doctor/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/chamcat97/godot-project-doctor/compare/v0.6.0...v0.7.0

@@ -155,6 +155,15 @@ class TestProjectDetection(unittest.TestCase):
             self.assertIn("GameState", summary.autoloads)
             self.assertEqual(summary.autoloads["GameState"], "res://autoload/GameState.gd")
 
+    def test_icon_parsed(self):
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '[application]\nconfig/name="X"\nconfig/icon="res://icon.svg"\n',
+            )
+            summary = parse_project_godot(root)
+            self.assertEqual(summary.icon, "res://icon.svg")
+
     def test_empty_dir_returns_empty_summary(self):
         with TempProject() as root:
             summary = parse_project_godot(root)
@@ -284,6 +293,22 @@ class TestUnusedAssetCandidates(unittest.TestCase):
             index = scan(root)
             candidates = [i for i in index.issues if i.code == "UNUSED_ASSET_CANDIDATE"]
             self.assertEqual(candidates, [])
+
+    def test_project_icon_not_flagged_unused(self):
+        """application/config/icon must count as a referenced asset."""
+        with TempProject() as root:
+            _write(
+                root / "project.godot",
+                '[application]\nconfig/name="X"\nconfig/icon="res://icon.svg"\n',
+            )
+            _write(root / "icon.svg", "<svg/>")
+            index = scan(root)
+            flagged = [
+                i
+                for i in index.issues
+                if i.code == "UNUSED_ASSET_CANDIDATE" and "icon.svg" in (i.file or "")
+            ]
+            self.assertEqual(flagged, [])
 
 
 # ─── Export presets check ─────────────────────────────────────────────────────
@@ -1426,7 +1451,7 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.8.1")
+        self.assertEqual(godot_project_doctor.__version__, "0.8.2")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
@@ -2308,6 +2333,32 @@ class TestApplyConfig(unittest.TestCase):
         result = self._apply(idx, cfg)
         self.assertEqual(len(result), 1)
 
+    def test_addons_ignored_by_default(self):
+        cfg = self._Config()  # ignore_addons defaults to True
+        idx = _make_index_with_issues([self._issue(file="addons/beehave/node.gd")])
+        self.assertEqual(self._apply(idx, cfg), [])
+
+    def test_script_templates_ignored_by_default(self):
+        cfg = self._Config()
+        idx = _make_index_with_issues([self._issue(file="script_templates/Node/default.gd")])
+        self.assertEqual(self._apply(idx, cfg), [])
+
+    def test_addons_backslash_path_ignored(self):
+        """Windows-style backslash paths under addons/ are also ignored."""
+        cfg = self._Config()
+        idx = _make_index_with_issues([self._issue(file="addons\\beehave\\node.gd")])
+        self.assertEqual(self._apply(idx, cfg), [])
+
+    def test_include_addons_re_enables_addon_issues(self):
+        cfg = self._Config(ignore_addons=False)
+        idx = _make_index_with_issues([self._issue(file="addons/beehave/node.gd")])
+        self.assertEqual(len(self._apply(idx, cfg)), 1)
+
+    def test_non_addons_path_not_affected_by_default(self):
+        cfg = self._Config()
+        idx = _make_index_with_issues([self._issue(file="addons_helper/util.gd")])
+        self.assertEqual(len(self._apply(idx, cfg)), 1)  # not under addons/
+
     def test_severity_override_changes_level(self):
         cfg = self._Config(severity_overrides={"CODE": "error"})
         idx = _make_index_with_issues([self._issue(sev=Severity.WARNING)])
@@ -2910,6 +2961,45 @@ class TestUnusedScriptCheck(unittest.TestCase):
         )
         unused = [i for i in issues if i.code == "UNUSED_SCRIPT"]
         self.assertEqual(unused, [])
+
+    def test_class_name_referenced_by_extends_not_flagged(self):
+        """A class_name script used as a base class via `extends Name` is referenced."""
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "unit_data.gd": "class_name UnitData extends Resource\n",
+                "hero_data.gd": "class_name HeroData extends UnitData\n",
+                "scenes/Main.tscn": (
+                    "[gd_scene format=3]\n"
+                    '[ext_resource type="Script" path="res://hero_data.gd" id="1"]\n'
+                ),
+            }
+        )
+        unused = [i.file for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertNotIn("unit_data.gd", unused)  # referenced via `extends UnitData`
+
+    def test_class_name_used_as_type_in_scene_not_flagged(self):
+        """A class_name registered node referenced as a scene node type is used."""
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "hero_body.gd": "class_name HeroBody extends Node2D\n",
+                "scenes/Main.tscn": ('[gd_scene format=3]\n[node name="Hero" type="HeroBody"]\n'),
+            }
+        )
+        unused = [i.file for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertNotIn("hero_body.gd", unused)
+
+    def test_unused_class_name_still_flagged(self):
+        """A class_name that is never referenced anywhere is still reported."""
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "lonely.gd": "class_name Lonely extends RefCounted\n",
+            }
+        )
+        unused = [i.file for i in issues if i.code == "UNUSED_SCRIPT"]
+        self.assertIn("lonely.gd", unused)
 
     def test_preloaded_script_not_flagged(self):
         issues = self._run(

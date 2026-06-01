@@ -118,6 +118,12 @@ def main() -> None:
     default=False,
     help="Shorthand for --fail-on warning.",
 )
+@click.option(
+    "--include-addons",
+    is_flag=True,
+    default=False,
+    help="Also audit code under res://addons/ (ignored by default).",
+)
 def scan_cmd(
     project_path: Path,
     fmt: str,
@@ -126,6 +132,7 @@ def scan_cmd(
     no_config: bool,
     fail_on: str,
     strict: bool,
+    include_addons: bool,
 ) -> None:
     """Scan a Godot project and report issues."""
     if strict:
@@ -136,6 +143,9 @@ def scan_cmd(
         cfg: Config | None = Config()  # pure defaults
     else:
         cfg = load_config(project_path.resolve(), config_path)
+
+    if include_addons and cfg is not None:
+        cfg.ignore_addons = False
 
     try:
         index = scan(project_path, cfg)
