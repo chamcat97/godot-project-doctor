@@ -49,6 +49,14 @@ ignore = ["E501"]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
 
+[tool.coverage.run]
+source = ["godot_project_doctor"]
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+
 [tool.mypy]
 python_version = "3.11"
 strict = false

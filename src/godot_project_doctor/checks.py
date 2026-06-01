@@ -147,7 +147,7 @@ def _check_missing_external_resources(index: ProjectIndex, project_root: Path) -
 def _check_large_textures(index: ProjectIndex, project_root: Path) -> list[Issue]:
     """Warn on raster images wider or taller than LARGE_TEXTURE_DIM pixels."""
     try:
-        from PIL import Image, UnidentifiedImageError
+        from PIL import Image
     except ImportError:
         return []
 
@@ -162,7 +162,9 @@ def _check_large_textures(index: ProjectIndex, project_root: Path) -> list[Issue
         try:
             with Image.open(abs_path) as img:
                 w, h = img.size
-        except (OSError, UnidentifiedImageError, Exception):
+        except Exception:
+            # PIL raises a wide variety of exceptions for corrupt or
+            # unsupported image files; skip them all rather than crashing.
             continue
 
         if w > LARGE_TEXTURE_DIM or h > LARGE_TEXTURE_DIM:
@@ -207,6 +209,31 @@ def _check_large_audio(index: ProjectIndex, project_root: Path) -> list[Issue]:
     return issues
 
 
+def _normalize_posix(path: str) -> str:
+    """Normalize a POSIX path string by resolving ``.`` and ``..`` components.
+
+    ``PurePosixPath`` does *not* collapse ``..``, so ``"scenes/../assets/x.png"``
+    would remain un-normalised and fail set-membership tests.  This helper
+    applies the same logic as ``os.path.normpath`` but stays platform-neutral
+    (always uses ``/`` separators).
+
+    Examples
+    --------
+    >>> _normalize_posix("scenes/../assets/bg.png")
+    'assets/bg.png'
+    >>> _normalize_posix("a/b/./c")
+    'a/b/c'
+    """
+    parts: list[str] = []
+    for component in path.replace("\\", "/").split("/"):
+        if component == "..":
+            if parts:
+                parts.pop()
+        elif component and component != ".":
+            parts.append(component)
+    return "/".join(parts)
+
+
 def _ref_to_canonical_rel(ref_path: str, source_file: str) -> str | None:
     """Return the project-root-relative canonical path for a resource reference.
 
@@ -215,15 +242,17 @@ def _ref_to_canonical_rel(ref_path: str, source_file: str) -> str | None:
 
     * ``res://foo/bar.png`` → ``"foo/bar.png"``
     * ``../assets/bg.png`` declared in ``scenes/Main.tscn``
-      → ``"assets/bg.png"``
+      → ``"assets/bg.png"``  (``..`` is resolved — no ``PurePosixPath`` leftover)
     """
     if ref_path.startswith("uid://"):
         return None
     if ref_path.startswith("res://"):
         return ref_path[len("res://") :]
-    # Relative path: normalise via PurePosixPath arithmetic
+    # Relative path: join with the declaring file's directory, then normalise.
+    # PurePosixPath does NOT resolve ".."; we use _normalize_posix() instead.
     source_dir = PurePosixPath(source_file.replace("\\", "/")).parent
-    return str(source_dir / ref_path)
+    raw = str(source_dir / ref_path)
+    return _normalize_posix(raw)
 
 
 def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> list[Issue]:

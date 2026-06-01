@@ -7,10 +7,7 @@ from pathlib import Path
 
 from godot_project_doctor.models import ProjectSummary
 
-# Matches: key="value" or key=val or key=PackedStringArray(...)
-_KV_RE = re.compile(r'^(\w+)\s*=\s*"?([^"\n]*)"?\s*$')
 _SECTION_RE = re.compile(r"^\[(\w+)\]")
-_AUTOLOAD_RE = re.compile(r'^(\w+)\s*=\s*"?\*?res://([^"\n]*)"?')
 
 
 def parse_project_godot(project_root: Path) -> ProjectSummary:

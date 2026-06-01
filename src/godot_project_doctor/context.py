@@ -46,7 +46,9 @@ def _capped(items: list, cap: int = _LIST_CAP) -> tuple[list, int]:
 # ── Investigation focus (deterministic rules) ─────────────────────────────────
 
 _MOBILE_KEYWORDS = frozenset(["mobile", "phone", "android", "ios", "tablet", "handheld"])
-_MISSING_KEYWORDS = frozenset(["missing", "broken", "reference", "ref", "not found", "load"])
+# "load" was intentionally removed: it is too common in non-error contexts
+# (e.g. "slow to load", "load time") and caused incorrect focus selection.
+_MISSING_KEYWORDS = frozenset(["missing", "broken", "reference", "ref", "not found"])
 
 
 def _investigation_focus(index: ProjectIndex, issue_text: str) -> list[str]:

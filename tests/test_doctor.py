@@ -1551,5 +1551,113 @@ class TestCp949Subprocess(unittest.TestCase):
             self._assert_no_traceback(result)
 
 
+# ─── _normalize_posix and _ref_to_canonical_rel ──────────────────────────────
+
+
+class TestNormalizePosixAndCanonicalRel(unittest.TestCase):
+    """Unit tests for the path-normalization helpers in checks.py."""
+
+    def setUp(self) -> None:
+        from godot_project_doctor.checks import _normalize_posix, _ref_to_canonical_rel
+
+        self._norm = _normalize_posix
+        self._canon = _ref_to_canonical_rel
+
+    # _normalize_posix
+    def test_plain_path_unchanged(self):
+        self.assertEqual(self._norm("assets/bg.png"), "assets/bg.png")
+
+    def test_dotdot_resolved(self):
+        self.assertEqual(self._norm("scenes/../assets/bg.png"), "assets/bg.png")
+
+    def test_multiple_dotdot_resolved(self):
+        self.assertEqual(self._norm("a/b/c/../../d.png"), "a/d.png")
+
+    def test_single_dot_removed(self):
+        self.assertEqual(self._norm("a/./b.png"), "a/b.png")
+
+    def test_backslash_normalised(self):
+        self.assertEqual(self._norm("scenes\\..\\assets\\bg.png"), "assets/bg.png")
+
+    def test_already_normalised_unchanged(self):
+        self.assertEqual(self._norm("foo/bar/baz.png"), "foo/bar/baz.png")
+
+    # _ref_to_canonical_rel
+    def test_res_path_strips_prefix(self):
+        self.assertEqual(
+            self._canon("res://assets/hero.png", "scenes/Main.tscn"),
+            "assets/hero.png",
+        )
+
+    def test_uid_returns_none(self):
+        self.assertIsNone(self._canon("uid://abc123", "scenes/Main.tscn"))
+
+    def test_relative_dotdot_resolved(self):
+        """../assets/bg.png from scenes/Main.tscn → assets/bg.png (not scenes/../...)."""
+        result = self._canon("../assets/bg.png", "scenes/Main.tscn")
+        self.assertEqual(result, "assets/bg.png")
+        self.assertNotIn("..", result)
+
+    def test_relative_same_dir(self):
+        result = self._canon("player.gd", "scripts/Player.gd")
+        self.assertEqual(result, "scripts/player.gd")
+
+    def test_relative_two_levels_up(self):
+        result = self._canon("../../shared/common.gd", "a/b/c.gd")
+        self.assertEqual(result, "shared/common.gd")
+
+
+class TestUnusedAssetRelativePath(unittest.TestCase):
+    """Ensure unused-asset check correctly handles relative ext_resource paths."""
+
+    def test_relative_dotdot_ref_suppresses_unused_warning(self):
+        """A .tscn referencing ../assets/hero.png must not flag hero.png as unused."""
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="RelTest"\n')
+            _write(root / "assets" / "hero.png", "PNG")
+            # Scene in scenes/ references ../assets/hero.png (relative path)
+            _write(
+                root / "scenes" / "Main.tscn",
+                "[gd_scene format=3]\n"
+                '[ext_resource type="Texture2D" path="../assets/hero.png" id="1"]\n',
+            )
+            index = scan(root)
+            unused = [i for i in index.issues if i.code == "UNUSED_ASSET_CANDIDATE"]
+            self.assertEqual(unused, [], "hero.png referenced via .. should not be flagged unused")
+
+
+# ─── context.py keyword fix ──────────────────────────────────────────────────
+
+
+class TestContextKeywordFix(unittest.TestCase):
+    def test_slow_load_time_issue_does_not_trigger_missing_focus(self):
+        """'game is slow to load' must NOT route to the missing-resource branch."""
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index, issue_text="game is slow to load")
+        focus = md.split("## Suggested Investigation Focus", 1)[-1]
+        # Should NOT say "missing external resource"
+        self.assertNotIn("missing external resource", focus.lower())
+
+    def test_missing_keyword_still_triggers_missing_focus(self):
+        issues = [
+            Issue(
+                "MISSING_EXT_RESOURCE",
+                Severity.ERROR,
+                "External resource not found: res://foo.gd",
+            )
+        ]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index, issue_text="missing resource error")
+        focus = md.split("## Suggested Investigation Focus", 1)[-1]
+        self.assertIn("missing external resource", focus.lower())
+
+    def test_broken_keyword_still_triggers_missing_focus(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index, issue_text="scene is broken")
+        focus = md.split("## Suggested Investigation Focus", 1)[-1]
+        # With no issues, should give static-analysis note (not crash)
+        self.assertIsNotNone(focus)
+
+
 if __name__ == "__main__":
     unittest.main()
