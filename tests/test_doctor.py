@@ -12,9 +12,11 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from godot_project_doctor.checks import run_all_checks
+from godot_project_doctor.context import render_context_markdown
 from godot_project_doctor.graph import build_graph, render_mermaid_graph, render_text_graph
 from godot_project_doctor.indexer import index_project, resolve_res_path
 from godot_project_doctor.models import (
+    FileStats,
     Issue,
     ProjectIndex,
     ProjectSummary,
@@ -538,6 +540,274 @@ class TestDependencyGraph(unittest.TestCase):
         graph: dict = {}
         mermaid = render_mermaid_graph(graph)
         self.assertIn("no dependencies", mermaid)
+
+
+# ─── Context report ───────────────────────────────────────────────────────────
+
+
+def _make_index_with_issues(issues: list) -> "ProjectIndex":
+    """Build a minimal ProjectIndex with the given issues pre-loaded."""
+    return ProjectIndex(
+        project_root="/fake/project",
+        summary=ProjectSummary(
+            project_name="TestGame",
+            main_scene="res://scenes/Main.tscn",
+            autoloads={"GameState": "res://autoload/GameState.gd"},
+            godot_version_hint="Godot 4.x",
+        ),
+        file_stats=FileStats(scenes=2, scripts=3, images=1, audio=1),
+        refs=[],
+        issues=issues,
+    )
+
+
+class TestContextReport(unittest.TestCase):
+
+    # ── Section headings present ──────────────────────────────────────────────
+
+    def test_report_contains_project_summary_heading(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("## Project Summary", md)
+
+    def test_report_contains_file_counts_heading(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("## File Counts", md)
+
+    def test_report_contains_issues_heading(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("## Issues", md)
+
+    def test_report_contains_missing_references_heading(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("## Missing References", md)
+
+    def test_report_contains_large_assets_heading(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("## Large Assets", md)
+
+    def test_report_contains_unused_assets_heading(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("## Unused Asset Candidates", md)
+
+    def test_report_contains_graph_summary_heading(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("## Dependency Graph Summary", md)
+
+    def test_report_contains_investigation_focus_heading(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("## Suggested Investigation Focus", md)
+
+    # ── Project metadata ──────────────────────────────────────────────────────
+
+    def test_report_contains_project_name(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("TestGame", md)
+
+    def test_report_contains_main_scene(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("res://scenes/Main.tscn", md)
+
+    def test_report_contains_autoload(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("GameState", md)
+        self.assertIn("res://autoload/GameState.gd", md)
+
+    def test_report_contains_godot_version(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("Godot 4.x", md)
+
+    def test_reported_issue_text_appears_in_output(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index, issue_text="game crashes on startup")
+        self.assertIn("game crashes on startup", md)
+
+    def test_no_issue_text_omits_reported_issue_section(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index, issue_text="")
+        self.assertNotIn("## Reported Issue", md)
+
+    # ── Issues section ────────────────────────────────────────────────────────
+
+    def test_no_issues_message_shown(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("No issues found", md)
+
+    def test_error_issue_appears_in_report(self):
+        issues = [Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
+                        "External resource not found: res://foo.gd",
+                        file="scenes/Main.tscn")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index)
+        self.assertIn("MISSING_EXT_RESOURCE", md)
+        self.assertIn("ERROR", md)
+
+    def test_warning_issue_appears_in_report(self):
+        issues = [Issue("UNUSED_ASSET_CANDIDATE", Severity.WARNING,
+                        "Asset not referenced: assets/bg.png",
+                        file="assets/bg.png")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index)
+        self.assertIn("UNUSED_ASSET_CANDIDATE", md)
+
+    # ── Missing references section ────────────────────────────────────────────
+
+    def test_missing_ref_shown_in_section(self):
+        issues = [Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
+                        "External resource not found: res://scripts/missing.gd",
+                        file="scenes/Main.tscn")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index)
+        self.assertIn("res://scripts/missing.gd", md)
+
+    def test_no_missing_refs_message(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("No missing references detected", md)
+
+    # ── Large assets section ──────────────────────────────────────────────────
+
+    def test_large_texture_shown_in_section(self):
+        issues = [Issue("LARGE_TEXTURE", Severity.WARNING,
+                        "Large texture (4096×4096): assets/hero.png",
+                        file="assets/hero.png")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index)
+        self.assertIn("assets/hero.png", md)
+        self.assertIn("Large Assets", md)
+
+    def test_large_audio_shown_in_section(self):
+        issues = [Issue("LARGE_AUDIO", Severity.WARNING,
+                        "Large audio file (15.2 MB): audio/music.ogg",
+                        file="audio/music.ogg")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index)
+        self.assertIn("audio/music.ogg", md)
+
+    def test_no_large_assets_message(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("No large assets detected", md)
+
+    # ── Unused assets section ─────────────────────────────────────────────────
+
+    def test_unused_asset_shown_in_section(self):
+        issues = [Issue("UNUSED_ASSET_CANDIDATE", Severity.WARNING,
+                        "Asset not referenced: assets/old_bg.png",
+                        file="assets/old_bg.png")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index)
+        self.assertIn("assets/old_bg.png", md)
+
+    # ── Investigation focus: mobile ───────────────────────────────────────────
+
+    def test_mobile_focus_mentions_large_textures(self):
+        issues = [Issue("LARGE_TEXTURE", Severity.WARNING,
+                        "Large texture (4096×4096): assets/bg.png",
+                        file="assets/bg.png")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index, issue_text="game is slow on mobile")
+        self.assertIn("Large textures", md)
+
+    def test_mobile_focus_mentions_export_presets_when_missing(self):
+        issues = [Issue("NO_EXPORT_PRESETS", Severity.INFO,
+                        "export_presets.cfg not found.")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index, issue_text="build for android mobile")
+        self.assertIn("export presets", md.lower())
+
+    def test_mobile_focus_no_large_assets_gives_positive_note(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index, issue_text="targeting ios mobile")
+        focus_section = md.split("## Suggested Investigation Focus", 1)[-1]
+        self.assertIn("No large textures", focus_section)
+
+    # ── Investigation focus: missing / broken / reference ─────────────────────
+
+    def test_missing_keyword_highlights_missing_refs(self):
+        issues = [Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
+                        "External resource not found: res://player.gd",
+                        file="scenes/Player.tscn")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index, issue_text="missing resource error")
+        focus = md.split("## Suggested Investigation Focus", 1)[-1]
+        self.assertIn("missing external resource", focus.lower())
+
+    def test_broken_keyword_highlights_missing_refs(self):
+        issues = [Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
+                        "External resource not found: res://ui.gd",
+                        file="scenes/UI.tscn")]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index, issue_text="broken scene references")
+        focus = md.split("## Suggested Investigation Focus", 1)[-1]
+        self.assertIn("missing external resource", focus.lower())
+
+    def test_reference_keyword_when_none_missing_gives_alternative_causes(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index, issue_text="reference not found")
+        focus = md.split("## Suggested Investigation Focus", 1)[-1]
+        self.assertIn("No missing external resources found", focus)
+
+    # ── Investigation focus: default ──────────────────────────────────────────
+
+    def test_default_focus_errors_mentioned_first(self):
+        issues = [
+            Issue("MISSING_EXT_RESOURCE", Severity.ERROR,
+                  "External resource not found: res://foo.gd"),
+            Issue("UNUSED_ASSET_CANDIDATE", Severity.WARNING,
+                  "Asset not referenced: assets/x.png"),
+        ]
+        index = _make_index_with_issues(issues)
+        md = render_context_markdown(index, issue_text="something odd is happening")
+        focus = md.split("## Suggested Investigation Focus", 1)[-1]
+        error_pos = focus.find("ERROR")
+        warning_pos = focus.find("WARNING")
+        self.assertLess(error_pos, warning_pos)
+
+    def test_default_focus_no_issues_gives_static_analysis_note(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index, issue_text="something odd is happening")
+        focus = md.split("## Suggested Investigation Focus", 1)[-1]
+        self.assertIn("No critical issues", focus)
+
+    # ── Markdown structure ────────────────────────────────────────────────────
+
+    def test_report_ends_with_footer(self):
+        index = _make_index_with_issues([])
+        md = render_context_markdown(index)
+        self.assertIn("godot-project-doctor", md)
+        self.assertIn("No AI APIs were called", md)
+
+    def test_report_is_valid_markdown_string(self):
+        with TempProject() as root:
+            make_project_with_valid_ref(root)
+            index = scan(root)
+            md = render_context_markdown(index, issue_text="test issue")
+            self.assertIsInstance(md, str)
+            self.assertGreater(len(md), 200)
+
+    def test_output_written_to_file(self):
+        with TempProject() as root:
+            make_minimal_project(root)
+            index = scan(root)
+            md = render_context_markdown(index)
+            out = root / "context.md"
+            out.write_text(md, encoding="utf-8")
+            self.assertTrue(out.exists())
+            content = out.read_text(encoding="utf-8")
+            self.assertIn("Project Summary", content)
 
 
 if __name__ == "__main__":
