@@ -1,0 +1,8 @@
+# Godot 4+ editor cache (regenerated on open)
+.godot/
+
+# Exported builds
+/android/
+/build/
+export.cfg
+export_presets.cfg

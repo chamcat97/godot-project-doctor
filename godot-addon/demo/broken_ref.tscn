@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3]
+
+; Demo: this scene references a texture that does not exist on disk, so the
+; doctor reports MISSING_EXT_RESOURCE. It is intentionally NOT the main scene
+; and not autoloaded, so it never loads at runtime.
+
+[ext_resource type="Texture2D" path="res://demo/missing_art.png" id="1_art"]
+
+[node name="BrokenRef" type="Sprite2D"]
+texture = ExtResource("1_art")
