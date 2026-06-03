@@ -25,8 +25,8 @@ your_project/
    offending scene/script.
 
 - **Errors / Warnings / Info** checkboxes filter the list without rescanning.
-- **Include addons** also audits `res://addons/` and `res://script_templates/`
-  (off by default — editor tooling produces a lot of false positives).
+- `res://addons/` and `res://script_templates/` are always excluded — the doctor
+  audits your code, not third-party plugins.
 
 ## What it detects
 

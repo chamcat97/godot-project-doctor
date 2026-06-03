@@ -36,7 +36,7 @@ func _init() -> void:
 	_sc_script_prop_re.compile("^script\\s*=\\s*ExtResource\\(\\s*\"?([^\"\\)\\s]+)\"?\\s*\\)")
 
 
-func run_all(index: Dictionary, include_addons: bool = false) -> Array:
+func run_all(index: Dictionary) -> Array:
 	var issues: Array = []
 	_append(issues, _check_missing_export_presets(index))
 	_append(issues, _check_project_integrity(index))
@@ -50,17 +50,7 @@ func run_all(index: Dictionary, include_addons: bool = false) -> Array:
 	_append(issues, _check_unused_scripts(index))
 	_append(issues, _check_unused_autoloads(index))
 	_append(issues, _check_duplicate_uid(index))
-
-	# Suppress findings *located in* addons/ & script_templates/ by default
-	# (their code is referenced via class_name / the editor, producing noise).
-	# Addon files are still indexed above, so their cross-references count.
-	if include_addons:
-		return issues
-	var filtered: Array = []
-	for it in issues:
-		if not _under_addons(it["file"]):
-			filtered.append(it)
-	return filtered
+	return issues
 
 
 # Individual checks
@@ -346,6 +336,11 @@ func _check_unused_autoloads(index: Dictionary) -> Array:
 	var pats := {}
 	var found := {}
 	for nm in index.autoloads:
+		# Skip autoloads provided by addons: their usage lives in addon code we
+		# don't scan, so we can't judge them (avoids false positives).
+		var rel := _ref_to_canonical_rel(index.autoloads[nm], "")
+		if rel != "" and _under_addons(rel):
+			continue
 		var re := RegEx.new()
 		re.compile("\\b" + Scanner.re_escape(nm) + "\\b")
 		pats[nm] = re
@@ -362,7 +357,7 @@ func _check_unused_autoloads(index: Dictionary) -> Array:
 			break
 
 	var out: Array = []
-	var names: Array = index.autoloads.keys()
+	var names: Array = found.keys()
 	names.sort()
 	for nm in names:
 		if found[nm]:
