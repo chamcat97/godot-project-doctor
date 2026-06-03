@@ -20,7 +20,6 @@ var _summary_label: Label
 var _cb_error: CheckBox
 var _cb_warning: CheckBox
 var _cb_info: CheckBox
-var _cb_addons: CheckBox
 var _tree: Tree
 
 var _issues: Array = []
@@ -52,14 +51,6 @@ func _build_ui() -> void:
 	_cb_error = _make_filter(bar, "Errors")
 	_cb_warning = _make_filter(bar, "Warnings")
 	_cb_info = _make_filter(bar, "Info")
-
-	bar.add_child(VSeparator.new())
-
-	_cb_addons = CheckBox.new()
-	_cb_addons.text = "Include addons"
-	_cb_addons.button_pressed = false
-	_cb_addons.tooltip_text = "Also audit code under res://addons/ and res://script_templates/."
-	bar.add_child(_cb_addons)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -109,7 +100,7 @@ func _on_scan_pressed() -> void:
 	var scanner := Scanner.new()
 	_last_index = scanner.scan()
 	var checks := Checks.new()
-	_issues = checks.run_all(_last_index, _cb_addons.button_pressed)
+	_issues = checks.run_all(_last_index)
 
 	_update_summary()
 	_populate()

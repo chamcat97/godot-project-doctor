@@ -49,9 +49,8 @@ func _init() -> void:
 
 ## Scan res:// and return the populated index Dictionary.
 ##
-## Always indexes everything (including res://addons/) so that cross-references
-## from addon code count toward usage. Suppressing addon *findings* is done at
-## the issue level in checks.gd (matches the CLI's ignore_addons behaviour).
+## res://addons/ and res://script_templates/ are skipped entirely — the doctor
+## audits your project's code, not third-party plugins or editor tooling.
 func scan() -> Dictionary:
 	var index := {
 		"project_name": "",
@@ -136,6 +135,9 @@ func _walk(rel_dir: String, index: Dictionary) -> void:
 	subdirs.sort()
 	for d in subdirs:
 		if SKIP_DIRS.has(d):
+			continue
+		# Third-party plugins and editor script templates are out of scope.
+		if rel_dir == "" and (d == "addons" or d == "script_templates"):
 			continue
 		var child := d if rel_dir == "" else rel_dir + "/" + d
 		_walk(child, index)
