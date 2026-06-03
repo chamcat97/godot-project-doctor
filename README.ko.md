@@ -61,6 +61,24 @@ Scanned 12 scenes, 18 scripts. 2 errors, 2 warnings, 1 info.
 
 ---
 
+## 에디터 애드온 (Godot 4 플러그인)
+
+에디터 안에서 바로 쓰고 싶다면, 동일한 검사를 **GDScript**로 네이티브 포팅한 애드온이
+[`godot-addon/addons/godot_project_doctor`](godot-addon/addons/godot_project_doctor)에 들어 있습니다 —
+**파이썬도, 의존성도 필요 없습니다.** 버튼 한 번으로 열려 있는 프로젝트를 검사합니다.
+
+1. `addons/godot_project_doctor/` 폴더를 내 프로젝트의 `addons/`에 복사합니다.
+2. **프로젝트 ▸ 프로젝트 설정 ▸ 플러그인**에서 활성화합니다.
+3. 하단 **🩺 Project Doctor** 패널을 열고 **Scan Project**를 클릭합니다.
+   결과를 더블클릭하면 해당 파일로 이동합니다.
+
+에디터 안에서 도는 만큼 `uid://` 참조와 텍스처 크기를 엔진에서 직접 해석하므로
+Pillow가 필요 없고 에디터 기준의 정확한 결과를 냅니다. CI·pre-commit 훅·AI 에이전트용으로는
+CLI를 계속 쓰면 됩니다. 자세한 내용은
+[애드온 README](godot-addon/addons/godot_project_doctor/README.md)를 참고하세요.
+
+---
+
 ## 사용법
 
 ### `scan` — 문제 검사

@@ -61,6 +61,24 @@ Scanned 12 scenes, 18 scripts. 2 errors, 2 warnings, 1 info.
 
 ---
 
+## Editor addon (Godot 4 plugin)
+
+Prefer working inside the editor? A native **GDScript** port of the same checks
+ships in [`godot-addon/addons/godot_project_doctor`](godot-addon/addons/godot_project_doctor) —
+**no Python, no dependencies**. One click audits the currently open project.
+
+1. Copy `addons/godot_project_doctor/` into your project's `addons/` folder.
+2. Enable it in **Project ▸ Project Settings ▸ Plugins**.
+3. Open the **🩺 Project Doctor** bottom panel and click **Scan Project**.
+   Double-click a finding to jump to the file.
+
+Running inside the editor, the addon resolves `uid://` references and texture
+sizes through the engine directly — no Pillow needed, and results match what the
+editor sees. The CLI remains the path for CI, pre-commit hooks, and AI agents.
+See the [addon README](godot-addon/addons/godot_project_doctor/README.md) for details.
+
+---
+
 ## Usage
 
 ### `scan` — audit for issues

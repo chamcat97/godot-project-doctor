@@ -1,0 +1,26 @@
+; Engine configuration file.
+; Minimal host project for the "Godot Project Doctor" editor addon.
+; Open this folder in Godot 4.2+ to try the plugin against the demo/ files.
+; Engine: Godot 4.2
+
+config_version=5
+
+[application]
+
+config/name="Project Doctor Demo"
+run/main_scene="res://demo/clean_main.tscn"
+config/features=PackedStringArray("4.2")
+config/icon="res://icon.svg"
+
+[autoload]
+
+GameState="*res://demo/game_state.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_project_doctor/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
