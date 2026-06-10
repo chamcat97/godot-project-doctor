@@ -50,3 +50,6 @@ Thumbs.db
 .godot/
 .import/
 export_presets.cfg
+
+# Parity harness: ephemeral addon copy made by CI / local runs
+tests/parity/fixture_project/addons/

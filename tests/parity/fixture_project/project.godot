@@ -1,0 +1,25 @@
+; Engine configuration file.
+; Parity fixture: intentionally broken in deterministic, headless-safe ways.
+; Expected findings live in tests/parity/expected.json — update BOTH when
+; changing this project. Do NOT open this project in the Godot *editor*
+; (it would regenerate .uid sidecars and break the DUPLICATE_UID case).
+
+config_version=5
+
+[application]
+
+config/name="Parity Fixture"
+run/main_scene="res://missing_main.tscn"
+config/features=PackedStringArray("4.2")
+
+[autoload]
+
+OrphanSingleton="*res://orphan_singleton.gd"
+UsedSingleton="*res://used_singleton.gd"
+
+[input]
+
+jump={
+"deadzone": 0.5,
+"events": []
+}
