@@ -1,12 +1,14 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://player.gd" id="1_p"]
 [ext_resource type="AudioStream" path="res://used.wav" id="2_w"]
+[ext_resource type="Script" path="res://dup_class_b.gd" id="3_d"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_p")
 
 [node name="Child" type="Node" parent="."]
+script = ExtResource("3_d")
 
 [connection signal="renamed" from="." to="." method="_on_present"]
 [connection signal="ready" from="." to="." method="_on_gone"]

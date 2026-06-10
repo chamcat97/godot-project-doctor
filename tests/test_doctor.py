@@ -3144,5 +3144,181 @@ class TestOutputWriteErrors(unittest.TestCase):
             self.assertNotEqual(result.exit_code, 0)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DANGLING_EXT_RESOURCE / DUPLICATE_CLASS_NAME
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDanglingExtResourceCheck(unittest.TestCase):
+    """DANGLING_EXT_RESOURCE: ExtResource("id") used without a declaration."""
+
+    def _run(self, files: dict) -> list:
+        from godot_project_doctor.checks import _check_dangling_ext_resources
+        from godot_project_doctor.indexer import index_project
+        from godot_project_doctor.parser import parse_project_godot
+
+        with TempProject() as root:
+            for rel, content in files.items():
+                _write(root / rel, content)
+            summary = parse_project_godot(root)
+            index = index_project(root, summary)
+            return _check_dangling_ext_resources(index, root)
+
+    def test_undeclared_id_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "broken.tscn": (
+                    "[gd_scene format=3]\n"
+                    '[node name="Main" type="Sprite2D"]\n'
+                    'texture = ExtResource("9_lost")\n'
+                ),
+            }
+        )
+        dangling = [i for i in issues if i.code == "DANGLING_EXT_RESOURCE"]
+        self.assertEqual(len(dangling), 1)
+        self.assertEqual(dangling[0].file, "broken.tscn")
+        self.assertIn("9_lost", dangling[0].message)
+
+    def test_declared_id_not_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "ok.tscn": (
+                    "[gd_scene format=3]\n"
+                    '[ext_resource type="Texture2D" path="res://icon.png" id="1_t"]\n'
+                    '[node name="Main" type="Sprite2D"]\n'
+                    'texture = ExtResource("1_t")\n'
+                ),
+            }
+        )
+        self.assertEqual([i for i in issues if i.code == "DANGLING_EXT_RESOURCE"], [])
+
+    def test_unquoted_legacy_id_supported(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "legacy.tscn": (
+                    "[gd_scene format=3]\n"
+                    '[node name="Main" type="Sprite2D"]\n'
+                    "texture = ExtResource(7)\n"
+                ),
+            }
+        )
+        dangling = [i for i in issues if i.code == "DANGLING_EXT_RESOURCE"]
+        self.assertEqual(len(dangling), 1)
+        self.assertIn("'7'", dangling[0].details)
+
+    def test_repeated_usage_one_issue_per_id(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "multi.tscn": (
+                    "[gd_scene format=3]\n"
+                    '[node name="Main" type="Node"]\n'
+                    'a = ExtResource("5_x")\n'
+                    'b = [ExtResource("5_x"), ExtResource("5_x")]\n'
+                ),
+            }
+        )
+        dangling = [i for i in issues if i.code == "DANGLING_EXT_RESOURCE"]
+        self.assertEqual(len(dangling), 1)
+        self.assertIn("3 time(s)", dangling[0].details)
+
+    def test_tres_files_also_checked(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "mat.tres": (
+                    '[gd_resource type="Material" format=3]\n'
+                    "[resource]\n"
+                    'shader = ExtResource("2_s")\n'
+                ),
+            }
+        )
+        dangling = [i for i in issues if i.code == "DANGLING_EXT_RESOURCE"]
+        self.assertEqual(len(dangling), 1)
+        self.assertEqual(dangling[0].file, "mat.tres")
+
+
+class TestDuplicateClassNameCheck(unittest.TestCase):
+    """DUPLICATE_CLASS_NAME: the same class_name declared by multiple scripts."""
+
+    def _run(self, files: dict, config=None) -> list:
+        from godot_project_doctor.checks import _check_duplicate_class_names
+        from godot_project_doctor.indexer import index_project
+        from godot_project_doctor.parser import parse_project_godot
+
+        with TempProject() as root:
+            for rel, content in files.items():
+                _write(root / rel, content)
+            summary = parse_project_godot(root)
+            index = index_project(root, summary)
+            return _check_duplicate_class_names(index, root, config)
+
+    def test_duplicate_flagged_with_both_paths(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "a/foo.gd": "class_name Foo\nextends Node\n",
+                "b/foo2.gd": "class_name Foo\nextends Node\n",
+            }
+        )
+        dups = [i for i in issues if i.code == "DUPLICATE_CLASS_NAME"]
+        self.assertEqual(len(dups), 1)
+        self.assertEqual(dups[0].file, "a/foo.gd")  # sorted first
+        self.assertIn("a/foo.gd", dups[0].details)
+        self.assertIn("b/foo2.gd", dups[0].details)
+
+    def test_unique_class_names_not_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "a.gd": "class_name Alpha\nextends Node\n",
+                "b.gd": "class_name Beta\nextends Node\n",
+            }
+        )
+        self.assertEqual([i for i in issues if i.code == "DUPLICATE_CLASS_NAME"], [])
+
+    def test_three_way_duplicate_single_issue(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "x.gd": "class_name Tri\n",
+                "y.gd": "class_name Tri\n",
+                "z.gd": "class_name Tri\n",
+            }
+        )
+        dups = [i for i in issues if i.code == "DUPLICATE_CLASS_NAME"]
+        self.assertEqual(len(dups), 1)
+        self.assertIn("3 scripts", dups[0].message)
+
+    def test_ignored_scripts_excluded(self):
+        """Scripts under addons/ are excluded with the default config."""
+        from godot_project_doctor.config import Config
+
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="Game"\n',
+                "mine.gd": "class_name Shared\nextends Node\n",
+                "addons/lib/theirs.gd": "class_name Shared\nextends Node\n",
+            },
+            config=Config(),
+        )
+        self.assertEqual([i for i in issues if i.code == "DUPLICATE_CLASS_NAME"], [])
+
+    def test_full_scan_emits_duplicate(self):
+        """End-to-end: scan() surfaces the new check."""
+        from godot_project_doctor.scanner import scan
+
+        with TempProject() as root:
+            _write(root / "project.godot", '[application]\nconfig/name="Game"\n')
+            _write(root / "one.gd", "class_name Twin\n")
+            _write(root / "two.gd", "class_name Twin\n")
+            index = scan(root)
+            codes = [i.code for i in index.issues]
+            self.assertIn("DUPLICATE_CLASS_NAME", codes)
+
+
 if __name__ == "__main__":
     unittest.main()

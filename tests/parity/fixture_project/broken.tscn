@@ -2,4 +2,6 @@
 
 [ext_resource type="Texture2D" path="res://nope.png" id="1_t"]
 
-[node name="Broken" type="Node"]
+[node name="Broken" type="Sprite2D"]
+texture = ExtResource("1_t")
+material = ExtResource("9_missing")

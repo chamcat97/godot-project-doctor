@@ -269,6 +269,8 @@ gdoctor scan ./my-godot-game --format sarif --output gdoctor.sarif
 | `MISSING_MAIN_SCENE` | ERROR | `project.godot`의 `run/main_scene`이 존재하지 않는 파일을 가리킴 |
 | `MISSING_AUTOLOAD` | ERROR | `project.godot`의 오토로드 경로가 존재하지 않음 |
 | `MISSING_EXT_RESOURCE` | ERROR | `.tscn`/`.tres`/`.gd` 파일이 존재하지 않는 경로를 참조함 |
+| `DANGLING_EXT_RESOURCE` | ERROR | 씬/리소스가 `[ext_resource]` 선언이 없는 `ExtResource("id")`를 사용함 (머지 충돌을 잘못 처리했을 때 흔히 발생) |
+| `DUPLICATE_CLASS_NAME` | ERROR | 같은 `class_name`을 둘 이상의 스크립트가 선언함 — 고도가 중복 등록에 실패함 |
 | `LARGE_TEXTURE` | WARNING | 래스터 이미지가 2048×2048px를 초과함 (Pillow 필요) |
 | `LARGE_AUDIO` | WARNING | 오디오 파일이 10MB보다 큼 |
 | `DUPLICATE_UID` | WARNING | 둘 이상의 소스가 서로 다른 파일에 동일한 `uid://`를 주장함 |
