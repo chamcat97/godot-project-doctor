@@ -1,0 +1,13 @@
+[
+  {"severity": "ERROR", "code": "MISSING_MAIN_SCENE", "file": "project.godot"},
+  {"severity": "ERROR", "code": "CIRCULAR_DEPENDENCY", "file": ""},
+  {"severity": "ERROR", "code": "MISSING_EXT_RESOURCE", "file": "broken.tscn"},
+  {"severity": "ERROR", "code": "MISSING_EXT_RESOURCE", "file": "player.gd"},
+  {"severity": "WARNING", "code": "BROKEN_SIGNAL_CONNECTION", "file": "main_ok.tscn"},
+  {"severity": "WARNING", "code": "UNDEFINED_INPUT_ACTION", "file": "player.gd"},
+  {"severity": "WARNING", "code": "UNUSED_SCRIPT", "file": "orphan.gd"},
+  {"severity": "WARNING", "code": "UNUSED_AUTOLOAD", "file": "project.godot"},
+  {"severity": "WARNING", "code": "UNUSED_ASSET_CANDIDATE", "file": "silence.wav"},
+  {"severity": "WARNING", "code": "DUPLICATE_UID", "file": ""},
+  {"severity": "INFO", "code": "NO_EXPORT_PRESETS", "file": ""}
+]

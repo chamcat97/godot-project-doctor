@@ -34,6 +34,66 @@ jobs:
       - name: Run tests
         run: pytest --cov=godot_project_doctor --cov-report=term-missing --cov-fail-under=80
 
+  # Guards against drift between the Python CLI and the GDScript editor addon:
+  # both scan tests/parity/fixture_project and must match tests/parity/expected.json.
+  parity:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.5.1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install gdoctor
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Cache Godot
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-bin
+          key: godot-${{ env.GODOT_VERSION }}-linux-x86_64
+
+      - name: Download Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/godot-bin"
+          curl -fL -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot-extract
+          mv "/tmp/godot-extract/Godot_v${GODOT_VERSION}-stable_linux.x86_64" "$HOME/godot-bin/godot"
+          chmod +x "$HOME/godot-bin/godot"
+
+      - name: CLI scan (pristine checkout)
+        run: |
+          gdoctor scan tests/parity/fixture_project \
+            --format json --output /tmp/cli_report.json --fail-on none
+
+      - name: Addon scan (headless Godot)
+        run: |
+          "$HOME/godot-bin/godot" --version
+          mkdir -p tests/parity/fixture_project/addons
+          cp -r godot-addon/addons/godot_project_doctor tests/parity/fixture_project/addons/
+          cp tests/parity/run_addon_scan.gd tests/parity/fixture_project/addons/run_addon_scan.gd
+          "$HOME/godot-bin/godot" --headless \
+            --path tests/parity/fixture_project \
+            --script res://addons/run_addon_scan.gd \
+            > /tmp/addon_out.txt 2>&1 || true
+          cat /tmp/addon_out.txt
+
+      - name: Compare CLI vs addon vs golden
+        run: |
+          python tests/parity/compare.py \
+            --cli /tmp/cli_report.json \
+            --addon /tmp/addon_out.txt \
+            --expected tests/parity/expected.json
+
   type-check:
     runs-on: ubuntu-latest
     steps:

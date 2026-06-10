@@ -8,6 +8,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **CLI ⇔ editor-addon parity harness** (`tests/parity/`). A committed fixture
+  project triggers 10 check codes deterministically; `expected.json` is the
+  single golden source of truth. The CLI side is asserted on every `pytest`
+  run (`tests/test_parity_fixture.py`); a new CI `parity` job runs the
+  GDScript addon against the same fixture with headless Godot 4.5.1 on Linux
+  and diffs both reports via `tests/parity/compare.py`. Prevents the two
+  implementations of the checks from drifting apart.
+
 ---
 
 ## [0.8.3] — 2026-06-01
