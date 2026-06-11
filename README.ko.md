@@ -25,7 +25,7 @@
 | **스크립트** | 정의되지 않은 입력 액션, 깨진 시그널 연결, 미사용 스크립트 |
 | **에셋** | 미사용 스크립트/오토로드, 미사용 에셋 후보, 과대 텍스처/오디오 |
 
-**v0.8.0 추가 사항**: 완전한 `uid://` 해석(사이드카 + import + 캐시), SARIF 2.1.0 출력, GitHub Action, 설정 기반 심각도 재정의, 미사용 스크립트 탐지.
+**v0.9.0 추가 사항**: 버튼 한 번의 고도 **에디터 애드온**(파이썬 불필요), `DANGLING_EXT_RESOURCE` + `DUPLICATE_CLASS_NAME` 검사, 상속 인식 시그널 검증, CLI ⇔ 애드온 패리티를 CI에서 자동 검증.
 
 ---
 
@@ -250,7 +250,7 @@ gdoctor scan ./my-godot-game --format sarif --output gdoctor.sarif
 
 ```yaml
 # .github/workflows/godot-doctor.yml
-- uses: chamcat97/godot-project-doctor@v0.8.3
+- uses: chamcat97/godot-project-doctor@v0.9.0
   with:
     project-path: .
     fail-on: warning
