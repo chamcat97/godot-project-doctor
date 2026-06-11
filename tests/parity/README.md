@@ -20,15 +20,16 @@ file** (so CLI ⇔ addon equality follows transitively):
 | CLI | every `pytest` run, all platforms | `tests/test_parity_fixture.py` |
 | addon | CI `parity` job (headless Godot on Linux) | `run_addon_scan.gd` → `compare.py` |
 
-## Covered checks (13 findings, 12 distinct codes)
+## Covered checks (14 findings, 12 distinct codes)
 
 `MISSING_MAIN_SCENE`, `CIRCULAR_DEPENDENCY`, `MISSING_EXT_RESOURCE` (×2: scene
 + GDScript `load()`), `DANGLING_EXT_RESOURCE`, `DUPLICATE_CLASS_NAME`,
-`BROKEN_SIGNAL_CONNECTION`, `UNDEFINED_INPUT_ACTION`, `UNUSED_SCRIPT`,
+`BROKEN_SIGNAL_CONNECTION` (×2: missing in attached script / missing in the
+whole `extends` chain), `UNDEFINED_INPUT_ACTION`, `UNUSED_SCRIPT`,
 `UNUSED_AUTOLOAD`, `UNUSED_ASSET_CANDIDATE`, `DUPLICATE_UID`,
 `NO_EXPORT_PRESETS` — plus negative cases (used class_name, used autoload,
 declared input action, referenced asset, declared ExtResource id, valid
-connection).
+connection, handler inherited from a project base class).
 
 Not covered: `LARGE_TEXTURE` / `LARGE_AUDIO` (would need Pillow + big binary
 files), `MISSING_AUTOLOAD` / `NO_MAIN_SCENE` (mutually exclusive with the

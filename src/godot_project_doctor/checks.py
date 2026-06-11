@@ -476,8 +476,84 @@ def _parse_scene_for_connections(
     return id_to_path, node_scripts, connections
 
 
+def _build_class_name_map(index: ProjectIndex, project_root: Path) -> dict[str, str]:
+    """Map each declared ``class_name`` to its declaring script (first declaration wins).
+
+    Keys are class names; values are project-root-relative POSIX script paths.
+    """
+    out: dict[str, str] = {}
+    for script in index.scripts:
+        norm = script.replace("\\", "/")
+        try:
+            text = (project_root / script).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = _CLASS_NAME_DECL_RE.search(text)
+        if m:
+            out.setdefault(m.group(1), norm)
+    return out
+
+
+def _method_in_script_chain(
+    script_rel: str,
+    method: str,
+    project_root: Path,
+    class_map: dict[str, str],
+    text_cache: dict[str, str | None],
+) -> bool:
+    """Return True when *method* is defined in *script_rel* or a user-script ancestor.
+
+    Follows the file-level ``extends`` declaration through the project:
+    ``extends "res://base.gd"`` / ``extends "base.gd"`` (relative to the
+    declaring script) / ``extends BaseName`` (resolved via *class_map*).
+    The walk stops at engine built-in classes (identifiers not in the map)
+    and guards against inheritance cycles.
+
+    Unreadable or missing scripts return True — i.e. "do not flag" — so that
+    MISSING_EXT_RESOURCE remains the single reporter for broken script paths.
+    """
+    func_pattern = re.compile(r"(?m)^\s*(?:static\s+)?func\s+" + re.escape(method) + r"\s*\(")
+    visited: set[str] = set()
+    current: str | None = script_rel.replace("\\", "/")
+
+    while current is not None and current not in visited:
+        visited.add(current)
+        if current not in text_cache:
+            try:
+                text_cache[current] = (project_root / current).read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError:
+                text_cache[current] = None
+        text = text_cache[current]
+        if text is None:
+            return True  # unreadable — skip rather than guess
+
+        if func_pattern.search(text):
+            return True
+
+        m = _EXTENDS_DECL_RE.search(text)
+        if not m:
+            return False  # no extends declaration — chain ends here
+        target = m.group(1) or m.group(2) or m.group(3) or ""
+        if target.startswith("res://"):
+            current = target[len("res://") :].replace("\\", "/")
+        elif target.endswith(".gd"):
+            # Relative quoted path — resolved against the declaring script's dir.
+            base_dir = str(PurePosixPath(current).parent)
+            current = _normalize_posix(f"{base_dir}/{target}")
+        else:
+            current = class_map.get(target)  # None → engine built-in / unknown
+
+    return False
+
+
 def _check_broken_signal_connections(index: ProjectIndex, project_root: Path) -> list[Issue]:
     """Warn when a signal connection targets a method not found in the script.
+
+    The target node's script **and its entire user-script ``extends`` chain**
+    are searched, so handlers defined on a project base class do not produce
+    false positives.
 
     False-positive guards
     ---------------------
@@ -485,12 +561,14 @@ def _check_broken_signal_connections(index: ProjectIndex, project_root: Path) ->
     * Script file is unreadable / does not exist → skip (let MISSING_EXT_RESOURCE
       report that separately).
     * ``to`` node path not in the scene's node map → skip.
-    * The ``method`` *is* inherited from a base class — static analysis cannot
-      trace the inheritance chain, so inherited methods are a known false-negative.
-      Users can suppress with ``severity.BROKEN_SIGNAL_CONNECTION = "none"`` in
-      config.
+    * Methods inherited from **engine built-in classes** (the chain's final,
+      unresolvable ancestor) cannot be verified statically and may still be
+      reported.  Users can suppress with
+      ``severity.BROKEN_SIGNAL_CONNECTION = "none"`` in config.
     """
     issues: list[Issue] = []
+    class_map: dict[str, str] | None = None
+    text_cache: dict[str, str | None] = {}
 
     for scene_rel in index.scenes:
         abs_path = project_root / scene_rel
@@ -522,18 +600,12 @@ def _check_broken_signal_connections(index: ProjectIndex, project_root: Path) ->
             if not script_res_path or not script_res_path.startswith("res://"):
                 continue  # not a GDScript path — skip
 
-            script_abs = project_root / script_res_path[len("res://") :]
-            try:
-                script_text = script_abs.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue  # unreadable — let MISSING_EXT_RESOURCE handle it
+            if class_map is None:
+                class_map = _build_class_name_map(index, project_root)
 
-            # Search for func definition (any indentation, optional static keyword)
-            func_pattern = re.compile(
-                r"(?m)^\s*(?:static\s+)?func\s+" + re.escape(method) + r"\s*\("
-            )
-            if func_pattern.search(script_text):
-                continue  # method present — OK
+            script_rel = script_res_path[len("res://") :]
+            if _method_in_script_chain(script_rel, method, project_root, class_map, text_cache):
+                continue  # method present in the script or an ancestor — OK
 
             issues.append(
                 Issue(
@@ -541,16 +613,17 @@ def _check_broken_signal_connections(index: ProjectIndex, project_root: Path) ->
                     severity=Severity.WARNING,
                     message=(
                         f"Signal '{conn['signal']}' connection targets missing method "
-                        f"'{method}' (not found in '{script_res_path}')"
+                        f"'{method}' (not found in '{script_res_path}' or its base scripts)"
                     ),
                     file=scene_rel,
                     details=(
                         f"Connection: signal='{conn['signal']}' from='{conn['from']}' "
                         f"to='{to_raw}' method='{method}'. "
-                        f"Script: {script_res_path}. "
-                        f"If '{method}' is inherited from a base class, suppress this "
-                        'warning with `severity.BROKEN_SIGNAL_CONNECTION = "none"` '
-                        "in your .gdoctor.toml."
+                        f"Script: {script_res_path}. The method was not found in the "
+                        "script or any of its 'extends' ancestors within the project. "
+                        f"If '{method}' is defined on an engine built-in class, this is "
+                        "a false positive — suppress with "
+                        '`severity.BROKEN_SIGNAL_CONNECTION = "none"` in your .gdoctor.toml.'
                     ),
                 )
             )
@@ -606,6 +679,18 @@ def _check_unused_asset_candidates(index: ProjectIndex, project_root: Path) -> l
 
 # Matches a `class_name MyClass` declaration at the start of a line.
 _CLASS_NAME_DECL_RE = re.compile(r"^\s*class_name\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
+
+# Matches the file-level `extends` declaration, in all three GDScript forms:
+#   extends "res://base.gd"     (quoted path, double or single quotes)
+#   extends BaseName            (global class identifier)
+#   class_name Foo extends Bar  (combined single-line form)
+# Anchored to column 0 so inner-class declarations (`class X extends Y:`,
+# which start with `class `) never match.
+_EXTENDS_DECL_RE = re.compile(
+    r"^(?:class_name\s+[A-Za-z_][A-Za-z0-9_]*\s+)?extends\s+"
+    r"(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))",
+    re.MULTILINE,
+)
 
 
 def _collect_class_name_usage(

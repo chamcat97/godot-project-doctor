@@ -6,6 +6,7 @@
   {"severity": "ERROR", "code": "DANGLING_EXT_RESOURCE", "file": "broken.tscn"},
   {"severity": "ERROR", "code": "DUPLICATE_CLASS_NAME", "file": "dup_class_a.gd"},
   {"severity": "WARNING", "code": "BROKEN_SIGNAL_CONNECTION", "file": "main_ok.tscn"},
+  {"severity": "WARNING", "code": "BROKEN_SIGNAL_CONNECTION", "file": "inherit.tscn"},
   {"severity": "WARNING", "code": "UNDEFINED_INPUT_ACTION", "file": "player.gd"},
   {"severity": "WARNING", "code": "UNUSED_SCRIPT", "file": "orphan.gd"},
   {"severity": "WARNING", "code": "UNUSED_AUTOLOAD", "file": "project.godot"},

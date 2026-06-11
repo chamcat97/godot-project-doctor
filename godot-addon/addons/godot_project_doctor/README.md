@@ -53,8 +53,10 @@ The two share the same check definitions; keep them in sync when adding checks.
 
 ## Notes / limitations (v1)
 
-- Static analysis only — dynamically loaded assets (`load(variable)`),
-  inherited signal-handler methods, and autoloads accessed only via
-  `get_node('/root/...')` or C#/GDExtension can produce false positives.
+- Static analysis only — dynamically loaded assets (`load(variable)`) and
+  autoloads accessed only via `get_node('/root/...')` or C#/GDExtension can
+  produce false positives. Signal connections follow the script's `extends`
+  chain through project scripts; only methods defined on engine built-in
+  classes remain unverifiable.
 - Config files (`.gdoctor.toml`), severity overrides, baselines, and report
   export are not yet wired into the addon (planned). Use the CLI for those.

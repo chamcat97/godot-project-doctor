@@ -8,6 +8,18 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **`BROKEN_SIGNAL_CONNECTION` is now inheritance-aware.** When the connected
+  method is not defined in the target node's script, the checker walks the
+  file-level `extends` chain through project scripts — `extends BaseName`
+  (resolved via `class_name`), `extends "res://base.gd"`, and relative quoted
+  paths, including the combined `class_name Foo extends Bar` form — before
+  flagging. This removes the tool's biggest documented false-positive class
+  (handlers defined on a project base class). Methods defined on engine
+  built-in classes remain statically unverifiable and may still be reported.
+  Implemented identically in the CLI and the editor addon; covered by the
+  parity fixture.
+
 ### Added
 - **New check `DANGLING_EXT_RESOURCE` (ERROR).** Flags `ExtResource("id")`
   usages in `.tscn`/`.tres` files whose `[ext_resource id="..."]` declaration

@@ -22,6 +22,7 @@ var _sc_conn_re: RegEx
 var _sc_attr_re: RegEx
 var _sc_script_prop_re: RegEx
 var _sc_ext_usage_re: RegEx
+var _extends_decl_re: RegEx
 
 
 func _init() -> void:
@@ -39,6 +40,14 @@ func _init() -> void:
 	# Word-character id charset so escaped quotes in strings cannot match.
 	_sc_ext_usage_re = RegEx.new()
 	_sc_ext_usage_re.compile("ExtResource\\(\\s*\"?([A-Za-z0-9_]+)\"?\\s*\\)")
+	# File-level `extends` declaration: quoted path (double/single) or global
+	# class identifier, including the combined `class_name Foo extends Bar`
+	# form. Anchored to column 0 so inner classes never match.
+	_extends_decl_re = RegEx.new()
+	_extends_decl_re.compile(
+		"(?m)^(?:class_name\\s+[A-Za-z_][A-Za-z0-9_]*\\s+)?extends\\s+" +
+		"(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))"
+	)
 
 
 func run_all(index: Dictionary) -> Array:
@@ -249,7 +258,10 @@ func _check_undefined_inputs(index: Dictionary) -> Array:
 
 func _check_broken_signals(index: Dictionary) -> Array:
 	var out: Array = []
-	var func_cache := {}  # "res_path|method" -> bool (method present)
+	var func_cache := {}  # "res_path|method" -> bool (method present in chain)
+	var text_cache := {}  # res_path -> script text ("" = unreadable)
+	var class_map := {}   # class_name -> declaring script rel path (lazy)
+	var class_map_built := false
 
 	for scene_rel in index.scenes:
 		var text := Scanner.read_text(scene_rel)
@@ -277,25 +289,31 @@ func _check_broken_signals(index: Dictionary) -> Array:
 			if script_res == "" or not script_res.begins_with("res://"):
 				continue
 
+			if not class_map_built:
+				class_map = _build_class_name_map(index)
+				class_map_built = true
+
 			var cache_key := script_res + "|" + method
 			var present: bool
 			if func_cache.has(cache_key):
 				present = func_cache[cache_key]
 			else:
-				present = _script_has_func(script_res, method)
+				present = _method_in_script_chain(script_res, method, class_map, text_cache)
 				func_cache[cache_key] = present
 			if present:
 				continue
 
 			out.append(_issue(
 				"BROKEN_SIGNAL_CONNECTION", "WARNING",
-				"Signal '%s' connection targets missing method '%s' (not found in '%s')"
+				"Signal '%s' connection targets missing method '%s' (not found in '%s' or its base scripts)"
 					% [conn["signal"], method, script_res],
 				scene_rel,
 				"Connection: signal='%s' from='%s' to='%s' method='%s'. Script: %s. "
 					% [conn["signal"], conn.get("from", "."), to_raw, method, script_res]
-					+ "If '%s' is inherited from a base class, this is a false positive."
-					% method,
+					+ "The method was not found in the script or any of its 'extends' "
+					+ "ancestors within the project. If '%s' is defined on an engine "
+					% method
+					+ "built-in class, this is a false positive.",
 			))
 	return out
 
@@ -549,13 +567,68 @@ func _parse_scene_connections(text: String) -> Dictionary:
 	return {"id_to_path": id_to_path, "node_scripts": node_scripts, "connections": connections}
 
 
-func _script_has_func(script_res: String, method: String) -> bool:
-	var script_text := Scanner.read_text(script_res)
-	if script_text == "":
-		return true  # unreadable -> skip (MISSING_EXT_RESOURCE reports it separately)
-	var re := RegEx.new()
-	re.compile("(?m)^\\s*(?:static\\s+)?func\\s+" + Scanner.re_escape(method) + "\\s*\\(")
-	return re.search(script_text) != null
+## Map each declared class_name to its declaring script rel path (first wins).
+func _build_class_name_map(index: Dictionary) -> Dictionary:
+	var cn_re := RegEx.new()
+	cn_re.compile("(?m)^\\s*class_name\\s+([A-Za-z_][A-Za-z0-9_]*)")
+	var map := {}
+	for s in index.scripts:
+		var t := Scanner.read_text(s)
+		if t == "":
+			continue
+		var m := cn_re.search(t)
+		if m != null and not map.has(m.get_string(1)):
+			map[m.get_string(1)] = String(s).replace("\\", "/")
+	return map
+
+
+## True when *method* is defined in the script at *script_res* or any
+## user-script ancestor along the file-level `extends` chain. Follows
+## `extends "res://base.gd"` / `extends "base.gd"` (relative) /
+## `extends BaseName` (via class_map); stops at engine built-ins and
+## guards against cycles. Unreadable scripts return true (skip —
+## MISSING_EXT_RESOURCE reports those separately).
+func _method_in_script_chain(
+	script_res: String, method: String, class_map: Dictionary, text_cache: Dictionary
+) -> bool:
+	var func_re := RegEx.new()
+	func_re.compile("(?m)^\\s*(?:static\\s+)?func\\s+" + Scanner.re_escape(method) + "\\s*\\(")
+	var visited := {}
+	var current := script_res
+
+	while current != "" and not visited.has(current):
+		visited[current] = true
+		var text: String
+		if text_cache.has(current):
+			text = text_cache[current]
+		else:
+			text = Scanner.read_text(current)
+			text_cache[current] = text
+		if text == "":
+			return true  # unreadable/missing — skip rather than guess
+		if func_re.search(text) != null:
+			return true
+
+		var m := _extends_decl_re.search(text)
+		if m == null:
+			return false  # no extends declaration — chain ends here
+		var quoted := m.get_string(1)
+		if quoted == "":
+			quoted = m.get_string(2)
+		if quoted != "":
+			if quoted.begins_with("res://"):
+				current = quoted
+			else:
+				# Relative quoted path — resolved against the declaring script's dir.
+				var base_dir := current.substr(6).get_base_dir()
+				current = "res://" + Scanner.normalize_posix(base_dir + "/" + quoted)
+		else:
+			var ident := m.get_string(3)
+			if class_map.has(ident):
+				current = "res://" + String(class_map[ident])
+			else:
+				current = ""  # engine built-in / unknown — chain ends
+	return false
 
 
 # class_name usage collection (port of _collect_class_name_usage)
