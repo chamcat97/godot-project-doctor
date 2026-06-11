@@ -8,19 +8,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
-- **`BROKEN_SIGNAL_CONNECTION` is now inheritance-aware.** When the connected
-  method is not defined in the target node's script, the checker walks the
-  file-level `extends` chain through project scripts — `extends BaseName`
-  (resolved via `class_name`), `extends "res://base.gd"`, and relative quoted
-  paths, including the combined `class_name Foo extends Bar` form — before
-  flagging. This removes the tool's biggest documented false-positive class
-  (handlers defined on a project base class). Methods defined on engine
-  built-in classes remain statically unverifiable and may still be reported.
-  Implemented identically in the CLI and the editor addon; covered by the
-  parity fixture.
+---
+
+## [0.9.0] — 2026-06-11
 
 ### Added
+- **Godot editor addon** (`godot-addon/addons/godot_project_doctor`). A native
+  GDScript port of the checks as a Godot 4.2+ editor plugin: a bottom-panel
+  **🩺 Project Doctor** dock scans the open project with one click, lists
+  findings grouped by severity, and opens the offending scene/script on
+  double-click. No Python required. `uid://` references resolve through the
+  engine's `ResourceUID`; texture sizes are read via imported textures (no
+  Pillow). `res://addons/` and `res://script_templates/` are always excluded —
+  the doctor audits your code, not third-party plugins (autoloads provided by
+  addons are likewise skipped by `UNUSED_AUTOLOAD`).
 - **New check `DANGLING_EXT_RESOURCE` (ERROR).** Flags `ExtResource("id")`
   usages in `.tscn`/`.tres` files whose `[ext_resource id="..."]` declaration
   is missing — the property silently fails to load. In practice this is the
@@ -32,12 +33,26 @@ Versions follow [Semantic Versioning](https://semver.org/).
   (`addons/` by default) are excluded from the analysis. Implemented in both
   the CLI and the editor addon; covered by the parity fixture.
 - **CLI ⇔ editor-addon parity harness** (`tests/parity/`). A committed fixture
-  project triggers 10 check codes deterministically; `expected.json` is the
+  project triggers the checks deterministically; `expected.json` is the
   single golden source of truth. The CLI side is asserted on every `pytest`
   run (`tests/test_parity_fixture.py`); a new CI `parity` job runs the
   GDScript addon against the same fixture with headless Godot 4.5.1 on Linux
   and diffs both reports via `tests/parity/compare.py`. Prevents the two
   implementations of the checks from drifting apart.
+
+### Changed
+- **`BROKEN_SIGNAL_CONNECTION` is now inheritance-aware.** When the connected
+  method is not defined in the target node's script, the checker walks the
+  file-level `extends` chain through project scripts — `extends BaseName`
+  (resolved via `class_name`), `extends "res://base.gd"`, and relative quoted
+  paths, including the combined `class_name Foo extends Bar` form — before
+  flagging. This removes the tool's biggest documented false-positive class
+  (handlers defined on a project base class). Methods defined on engine
+  built-in classes remain statically unverifiable and may still be reported.
+  Implemented identically in the CLI and the editor addon; covered by the
+  parity fixture.
+- `__version__` bumped to `"0.9.0"`; the editor addon's `plugin.cfg` version
+  now tracks the package version.
 
 ---
 

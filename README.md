@@ -25,7 +25,7 @@ A deterministic CLI auditor for [Godot 4](https://godotengine.org/) projects.
 | **Scripts** | Undefined input actions, broken signal connections, unused scripts |
 | **Assets** | Unused scripts/autoloads, unused asset candidates, oversized textures/audio |
 
-**v0.8.0 additions**: Full `uid://` resolution (sidecar + import + cache), SARIF 2.1.0 output, GitHub Action, config-driven severity overrides, unused-script detection.
+**v0.9.0 additions**: One-click Godot **editor addon** (no Python needed), `DANGLING_EXT_RESOURCE` + `DUPLICATE_CLASS_NAME` checks, inheritance-aware signal validation, CLI ⇔ addon parity-tested in CI.
 
 ---
 
@@ -251,7 +251,7 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 
 ```yaml
 # .github/workflows/godot-doctor.yml
-- uses: chamcat97/godot-project-doctor@v0.8.3
+- uses: chamcat97/godot-project-doctor@v0.9.0
   with:
     project-path: .
     fail-on: warning

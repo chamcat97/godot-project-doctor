@@ -1451,7 +1451,7 @@ class TestVersionConsistency(unittest.TestCase):
     def test_package_version(self):
         import godot_project_doctor
 
-        self.assertEqual(godot_project_doctor.__version__, "0.8.3")
+        self.assertEqual(godot_project_doctor.__version__, "0.9.0")
 
     def test_schema_version_constant_is_1_1(self):
         from godot_project_doctor.models import SCHEMA_VERSION
