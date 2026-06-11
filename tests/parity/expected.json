@@ -3,6 +3,8 @@
   {"severity": "ERROR", "code": "CIRCULAR_DEPENDENCY", "file": ""},
   {"severity": "ERROR", "code": "MISSING_EXT_RESOURCE", "file": "broken.tscn"},
   {"severity": "ERROR", "code": "MISSING_EXT_RESOURCE", "file": "player.gd"},
+  {"severity": "ERROR", "code": "DANGLING_EXT_RESOURCE", "file": "broken.tscn"},
+  {"severity": "ERROR", "code": "DUPLICATE_CLASS_NAME", "file": "dup_class_a.gd"},
   {"severity": "WARNING", "code": "BROKEN_SIGNAL_CONNECTION", "file": "main_ok.tscn"},
   {"severity": "WARNING", "code": "UNDEFINED_INPUT_ACTION", "file": "player.gd"},
   {"severity": "WARNING", "code": "UNUSED_SCRIPT", "file": "orphan.gd"},

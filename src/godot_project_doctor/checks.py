@@ -25,6 +25,10 @@ _SC_CONN_RE = re.compile(r"\[connection\b([^\]]*)\]")
 _SC_ATTR_RE = re.compile(r'\b(\w+)="([^"]*)"')
 # Matches both quoted ("1_abc") and unquoted (1) ExtResource IDs
 _SC_SCRIPT_PROP_RE = re.compile(r'^script\s*=\s*ExtResource\(\s*"?([^"\)\s]+)"?\s*\)')
+# Any ExtResource("id") / ExtResource(id) usage in a property value
+# (DANGLING_EXT_RESOURCE). The id charset is restricted to word characters so
+# escaped quotes inside string property values cannot produce bogus matches.
+_SC_EXT_USAGE_RE = re.compile(r'ExtResource\(\s*"?([A-Za-z0-9_]+)"?\s*\)')
 
 # Constants
 
@@ -61,6 +65,8 @@ def run_all_checks(index: ProjectIndex, config: Config | None = None) -> list[Is
     issues.extend(_check_broken_signal_connections(index, project_root))
     issues.extend(_check_unused_scripts(index, project_root))
     issues.extend(_check_unused_autoloads(index, project_root))
+    issues.extend(_check_dangling_ext_resources(index, project_root))
+    issues.extend(_check_duplicate_class_names(index, project_root, config))
 
     return issues
 
@@ -778,6 +784,106 @@ def _check_unused_autoloads(index: ProjectIndex, project_root: Path) -> list[Iss
                     "does not appear in any .gd file. "
                     "If it is accessed via get_node('/root/...') or only from C#/GDNative, "
                     'suppress with `severity.UNUSED_AUTOLOAD = "none"` in .gdoctor.toml.'
+                ),
+            )
+        )
+    return issues
+
+
+def _check_dangling_ext_resources(index: ProjectIndex, project_root: Path) -> list[Issue]:
+    """Flag ``ExtResource("id")`` usages whose id has no ``[ext_resource]`` declaration.
+
+    A scene that uses an undeclared ext-resource id fails to bind that property
+    when loaded.  In practice this almost always comes from a mishandled merge
+    conflict in a ``.tscn``/``.tres`` file (the declaration block was lost while
+    the usage survived).
+
+    One issue is emitted per (file, id) pair, regardless of how many times the
+    dangling id is used in that file.
+    """
+    issues: list[Issue] = []
+
+    for rel in list(index.scenes) + list(index.resources):
+        try:
+            text = (project_root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        declared: set[str] = set()
+        used: dict[str, int] = {}
+        for line in text.splitlines():
+            s = line.strip()
+            m = _SC_EXT_RES_RE.match(s)
+            if m:
+                attrs = dict(_SC_ATTR_RE.findall(m.group(1)))
+                rid = attrs.get("id", "")
+                if rid:
+                    declared.add(rid)
+                continue
+            for um in _SC_EXT_USAGE_RE.finditer(s):
+                rid = um.group(1)
+                used[rid] = used.get(rid, 0) + 1
+
+        for rid in sorted(set(used) - declared):
+            issues.append(
+                Issue(
+                    code="DANGLING_EXT_RESOURCE",
+                    severity=Severity.ERROR,
+                    message=f'ExtResource("{rid}") used but never declared: {rel}',
+                    file=rel,
+                    details=(
+                        f"The id '{rid}' is used {used[rid]} time(s) but no "
+                        f'[ext_resource id="{rid}"] block declares it. '
+                        "The property will fail to load. This usually indicates a "
+                        "mishandled merge conflict that dropped the declaration."
+                    ),
+                )
+            )
+    return issues
+
+
+def _check_duplicate_class_names(
+    index: ProjectIndex, project_root: Path, config: Config | None = None
+) -> list[Issue]:
+    """Flag ``class_name`` identifiers declared by more than one script.
+
+    Godot registers global script classes by name; a second declaration of the
+    same name produces a parse/load error ("hides a global script class") in
+    the editor and at runtime.  This is a static certainty — no heuristics.
+
+    Scripts matching the ignore configuration (``addons/`` by default) are
+    excluded from the analysis so the result matches what the project's own
+    code declares.
+    """
+    decls: dict[str, list[str]] = defaultdict(list)
+
+    for script in index.scripts:
+        norm = script.replace("\\", "/")
+        if config is not None and config.is_ignored(norm):
+            continue
+        try:
+            text = (project_root / script).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = _CLASS_NAME_DECL_RE.search(text)
+        if m:
+            decls[m.group(1)].append(norm)
+
+    issues: list[Issue] = []
+    for name in sorted(decls):
+        scripts = sorted(decls[name])
+        if len(scripts) <= 1:
+            continue
+        issues.append(
+            Issue(
+                code="DUPLICATE_CLASS_NAME",
+                severity=Severity.ERROR,
+                message=f"class_name '{name}' is declared by {len(scripts)} scripts",
+                file=scripts[0],
+                details=(
+                    f"Declared in: {', '.join(scripts)}. "
+                    "Godot registers one global class per name; the duplicate "
+                    "declaration fails to parse ('hides a global script class')."
                 ),
             )
         )

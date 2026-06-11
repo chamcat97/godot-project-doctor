@@ -9,6 +9,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **New check `DANGLING_EXT_RESOURCE` (ERROR).** Flags `ExtResource("id")`
+  usages in `.tscn`/`.tres` files whose `[ext_resource id="..."]` declaration
+  is missing — the property silently fails to load. In practice this is the
+  signature of a mishandled merge conflict. Implemented in both the CLI and
+  the editor addon; covered by the parity fixture.
+- **New check `DUPLICATE_CLASS_NAME` (ERROR).** Flags a `class_name` declared
+  by more than one script (Godot refuses to register the duplicate: "hides a
+  global script class"). Scripts matching the ignore configuration
+  (`addons/` by default) are excluded from the analysis. Implemented in both
+  the CLI and the editor addon; covered by the parity fixture.
 - **CLI ⇔ editor-addon parity harness** (`tests/parity/`). A committed fixture
   project triggers 10 check codes deterministically; `expected.json` is the
   single golden source of truth. The CLI side is asserted on every `pytest`

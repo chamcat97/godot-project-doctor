@@ -270,6 +270,8 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 | `MISSING_MAIN_SCENE` | ERROR | `run/main_scene` in `project.godot` points to a file that does not exist |
 | `MISSING_AUTOLOAD` | ERROR | An autoload path in `project.godot` does not exist |
 | `MISSING_EXT_RESOURCE` | ERROR | A `.tscn`/`.tres`/`.gd` file references a path that does not exist |
+| `DANGLING_EXT_RESOURCE` | ERROR | A scene/resource uses `ExtResource("id")` whose `[ext_resource]` declaration is missing (typical leftover of a mishandled merge conflict) |
+| `DUPLICATE_CLASS_NAME` | ERROR | The same `class_name` is declared by more than one script — Godot fails to register the duplicate |
 | `LARGE_TEXTURE` | WARNING | Raster image exceeds 2048×2048 px (requires Pillow) |
 | `LARGE_AUDIO` | WARNING | Audio file is larger than 10 MB |
 | `DUPLICATE_UID` | WARNING | Two or more sources claim the same `uid://` for different files |

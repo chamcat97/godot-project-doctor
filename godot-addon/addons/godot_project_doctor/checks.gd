@@ -21,6 +21,7 @@ var _sc_node_re: RegEx
 var _sc_conn_re: RegEx
 var _sc_attr_re: RegEx
 var _sc_script_prop_re: RegEx
+var _sc_ext_usage_re: RegEx
 
 
 func _init() -> void:
@@ -34,6 +35,10 @@ func _init() -> void:
 	_sc_attr_re.compile("\\b(\\w+)=\"([^\"]*)\"")
 	_sc_script_prop_re = RegEx.new()
 	_sc_script_prop_re.compile("^script\\s*=\\s*ExtResource\\(\\s*\"?([^\"\\)\\s]+)\"?\\s*\\)")
+	# Any ExtResource("id") / ExtResource(id) usage (DANGLING_EXT_RESOURCE).
+	# Word-character id charset so escaped quotes in strings cannot match.
+	_sc_ext_usage_re = RegEx.new()
+	_sc_ext_usage_re.compile("ExtResource\\(\\s*\"?([A-Za-z0-9_]+)\"?\\s*\\)")
 
 
 func run_all(index: Dictionary) -> Array:
@@ -50,6 +55,8 @@ func run_all(index: Dictionary) -> Array:
 	_append(issues, _check_unused_scripts(index))
 	_append(issues, _check_unused_autoloads(index))
 	_append(issues, _check_duplicate_uid(index))
+	_append(issues, _check_dangling_ext_resources(index))
+	_append(issues, _check_duplicate_class_names(index))
 	return issues
 
 
@@ -396,6 +403,80 @@ func _check_duplicate_uid(index: Dictionary) -> Array:
 			"Duplicate UID %s claimed by %d resources" % [u, paths.size()],
 			paths[0],
 			"UID %s is assigned to multiple paths: %s" % [u, _join_strings(paths, ", ")],
+		))
+	return out
+
+
+func _check_dangling_ext_resources(index: Dictionary) -> Array:
+	var out: Array = []
+	for rel in (index.scenes + index.resources):
+		var text := Scanner.read_text(rel)
+		if text == "":
+			continue
+		var declared := {}
+		var used := {}  # id -> usage count
+		for line in text.split("\n"):
+			var s: String = line.strip_edges()
+			var m := _sc_ext_res_re.search(s)
+			if m != null:
+				var attrs := _parse_attrs(m.get_string(1))
+				var rid: String = attrs.get("id", "")
+				if rid != "":
+					declared[rid] = true
+				continue
+			for um in _sc_ext_usage_re.search_all(s):
+				var uid := um.get_string(1)
+				used[uid] = used.get(uid, 0) + 1
+		var missing: Array = []
+		for rid in used:
+			if not declared.has(rid):
+				missing.append(rid)
+		missing.sort()
+		for rid in missing:
+			out.append(_issue(
+				"DANGLING_EXT_RESOURCE", "ERROR",
+				"ExtResource(\"%s\") used but never declared: %s" % [rid, rel],
+				rel,
+				"The id '%s' is used %d time(s) but no [ext_resource id=\"%s\"] block "
+					% [rid, used[rid], rid]
+					+ "declares it. The property will fail to load. This usually indicates "
+					+ "a mishandled merge conflict that dropped the declaration.",
+			))
+	return out
+
+
+func _check_duplicate_class_names(index: Dictionary) -> Array:
+	var cn_re := RegEx.new()
+	cn_re.compile("(?m)^\\s*class_name\\s+([A-Za-z_][A-Za-z0-9_]*)")
+
+	var decls := {}  # class_name -> Array of declaring script rel paths
+	for s in index.scripts:
+		var t := Scanner.read_text(s)
+		if t == "":
+			continue
+		var m := cn_re.search(t)
+		if m == null:
+			continue
+		var nm := m.get_string(1)
+		if not decls.has(nm):
+			decls[nm] = []
+		decls[nm].append(String(s).replace("\\", "/"))
+
+	var out: Array = []
+	var names: Array = decls.keys()
+	names.sort()
+	for nm in names:
+		var scripts: Array = decls[nm]
+		if scripts.size() <= 1:
+			continue
+		scripts.sort()
+		out.append(_issue(
+			"DUPLICATE_CLASS_NAME", "ERROR",
+			"class_name '%s' is declared by %d scripts" % [nm, scripts.size()],
+			scripts[0],
+			"Declared in: %s. Godot registers one global class per name; the "
+				% _join_strings(scripts, ", ")
+				+ "duplicate declaration fails to parse ('hides a global script class').",
 		))
 	return out
 
