@@ -3320,5 +3320,120 @@ class TestDuplicateClassNameCheck(unittest.TestCase):
             self.assertIn("DUPLICATE_CLASS_NAME", codes)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# BROKEN_SIGNAL_CONNECTION — inheritance-chain awareness
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestInheritedSignalHandlers(unittest.TestCase):
+    """BROKEN_SIGNAL_CONNECTION follows the script's `extends` chain."""
+
+    def _run(self, files: dict) -> list:
+        from godot_project_doctor.checks import _check_broken_signal_connections
+        from godot_project_doctor.indexer import index_project
+        from godot_project_doctor.parser import parse_project_godot
+
+        with TempProject() as root:
+            for rel, content in files.items():
+                _write(root / rel, content)
+            summary = parse_project_godot(root)
+            index = index_project(root, summary)
+            return [
+                i
+                for i in _check_broken_signal_connections(index, root)
+                if i.code == "BROKEN_SIGNAL_CONNECTION"
+            ]
+
+    @staticmethod
+    def _scene(script_path: str, method: str) -> str:
+        return (
+            "[gd_scene format=3]\n"
+            f'[ext_resource type="Script" path="{script_path}" id="1"]\n'
+            '[node name="Main" type="Node"]\n'
+            'script = ExtResource("1")\n'
+            f'[connection signal="ready" from="." to="." method="{method}"]\n'
+        )
+
+    def test_handler_in_class_name_base_not_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="G"\n',
+                "base.gd": "class_name BaseUI\nextends Node\n\nfunc _on_pressed():\n\tpass\n",
+                "child.gd": "extends BaseUI\n",
+                "ui.tscn": self._scene("res://child.gd", "_on_pressed"),
+            }
+        )
+        self.assertEqual(issues, [])
+
+    def test_handler_in_res_path_base_not_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="G"\n',
+                "base.gd": "extends Node\n\nfunc _on_hit():\n\tpass\n",
+                "child.gd": 'extends "res://base.gd"\n',
+                "s.tscn": self._scene("res://child.gd", "_on_hit"),
+            }
+        )
+        self.assertEqual(issues, [])
+
+    def test_handler_in_relative_path_base_not_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="G"\n',
+                "ui/base.gd": "extends Node\n\nfunc _on_close():\n\tpass\n",
+                "ui/child.gd": 'extends "base.gd"\n',
+                "s.tscn": self._scene("res://ui/child.gd", "_on_close"),
+            }
+        )
+        self.assertEqual(issues, [])
+
+    def test_handler_in_grandparent_not_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="G"\n',
+                "a.gd": "class_name GrandBase\nextends Node\n\nfunc _on_deep():\n\tpass\n",
+                "b.gd": "class_name MidBase\nextends GrandBase\n",
+                "c.gd": "extends MidBase\n",
+                "s.tscn": self._scene("res://c.gd", "_on_deep"),
+            }
+        )
+        self.assertEqual(issues, [])
+
+    def test_combined_class_name_extends_form_resolved(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="G"\n',
+                "base.gd": "extends Node\n\nfunc _on_combo():\n\tpass\n",
+                "mid.gd": 'class_name ComboMid extends "res://base.gd"\n',
+                "leaf.gd": "extends ComboMid\n",
+                "s.tscn": self._scene("res://leaf.gd", "_on_combo"),
+            }
+        )
+        self.assertEqual(issues, [])
+
+    def test_method_nowhere_in_chain_flagged(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="G"\n',
+                "base.gd": "class_name LonelyBase\nextends Node\n",
+                "child.gd": "extends LonelyBase\n",
+                "s.tscn": self._scene("res://child.gd", "_on_ghost"),
+            }
+        )
+        self.assertEqual(len(issues), 1)
+        self.assertIn("base scripts", issues[0].message)
+
+    def test_extends_cycle_terminates_and_flags(self):
+        issues = self._run(
+            {
+                "project.godot": '[application]\nconfig/name="G"\n',
+                "a.gd": 'extends "res://b.gd"\n',
+                "b.gd": 'extends "res://a.gd"\n',
+                "s.tscn": self._scene("res://a.gd", "_on_loop"),
+            }
+        )
+        self.assertEqual(len(issues), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

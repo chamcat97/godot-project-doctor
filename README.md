@@ -275,7 +275,7 @@ Use the bundled **GitHub Action** to scan and upload in one step:
 | `LARGE_TEXTURE` | WARNING | Raster image exceeds 2048×2048 px (requires Pillow) |
 | `LARGE_AUDIO` | WARNING | Audio file is larger than 10 MB |
 | `DUPLICATE_UID` | WARNING | Two or more sources claim the same `uid://` for different files |
-| `BROKEN_SIGNAL_CONNECTION` | WARNING | A `.tscn` signal connection's `method` is not found in the target node's attached GDScript (inherited methods not checked — false-negatives possible) |
+| `BROKEN_SIGNAL_CONNECTION` | WARNING | A `.tscn` signal connection's `method` is not found in the target node's script **or any of its `extends` ancestors** within the project (methods defined on engine built-in classes cannot be verified statically and may still be reported) |
 | `UNDEFINED_INPUT_ACTION` | WARNING | GDScript calls `Input.is_action_*()`/`get_action_strength()` with a name not declared in `project.godot` `[input]` (built-in `ui_*` actions excluded) |
 | `UNUSED_AUTOLOAD` | WARNING | Autoload singleton name not referenced in any `.gd` file (access via `get_node('/root/...')` or non-GDScript code are false positives) |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | Asset not referenced by any parsed scene, resource, or script |

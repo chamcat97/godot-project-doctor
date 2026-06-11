@@ -274,7 +274,7 @@ gdoctor scan ./my-godot-game --format sarif --output gdoctor.sarif
 | `LARGE_TEXTURE` | WARNING | 래스터 이미지가 2048×2048px를 초과함 (Pillow 필요) |
 | `LARGE_AUDIO` | WARNING | 오디오 파일이 10MB보다 큼 |
 | `DUPLICATE_UID` | WARNING | 둘 이상의 소스가 서로 다른 파일에 동일한 `uid://`를 주장함 |
-| `BROKEN_SIGNAL_CONNECTION` | WARNING | `.tscn` 시그널 연결의 `method`가 대상 노드에 연결된 GDScript에서 발견되지 않음 (상속된 메서드는 검사 안 함 — 거짓 음성 가능) |
+| `BROKEN_SIGNAL_CONNECTION` | WARNING | `.tscn` 시그널 연결의 `method`가 대상 노드의 스크립트와 그 **`extends` 체인**(프로젝트 내 스크립트) 어디에서도 발견되지 않음 (엔진 내장 클래스의 메서드는 정적으로 확인할 수 없어 여전히 보고될 수 있음) |
 | `UNDEFINED_INPUT_ACTION` | WARNING | GDScript가 `Input.is_action_*()`/`get_action_strength()`를 `project.godot`의 `[input]`에 선언되지 않은 이름으로 호출함 (내장 `ui_*` 액션은 제외) |
 | `UNUSED_AUTOLOAD` | WARNING | 오토로드 싱글톤 이름이 어떤 `.gd` 파일에서도 참조되지 않음 (`get_node('/root/...')` 접근이나 비-GDScript 코드는 거짓 양성) |
 | `UNUSED_ASSET_CANDIDATE` | WARNING | 파싱된 어떤 씬·리소스·스크립트에서도 참조되지 않는 에셋 |
